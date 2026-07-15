@@ -49,14 +49,19 @@ def send_telegram_message(text):
         "parse_mode": "HTML"
     }
     try:
-        data = urllib.parse.urlencode(payload).encode("utf-8")
-        req = urllib.request.Request(url, data=data, method="POST")
+        # Кодируем данные в формат JSON и добавляем правильный заголовок контента
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            url, 
+            data=data, 
+            headers={"Content-Type": "application/json"}, 
+            method="POST"
+        )
         with urllib.request.urlopen(req, timeout=10, context=SSL_CONTEXT) as response:
             if response.status != 200:
                 print(f"[Telegram] Ошибка отправки: {response.status}")
     except Exception as e:
         print(f"[Telegram] Ошибка подключения: {e}")
-
 
 def parse_fractional_odds(fraction_str):
     """Преобразует дробный коэффициент в десятичный (float)."""
