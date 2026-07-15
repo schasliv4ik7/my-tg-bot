@@ -5,6 +5,10 @@ import threading
 import requests
 from flask import Flask
 
+# Отключаем предупреждения об отсутствии SSL-верификации
+from requests.packages.urllib3.exceptions import InsecureRequestWarning
+requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
+
 # --- НАСТРОЙКИ TELEGRAM ---
 BOT_TOKEN = "8225494453:AAG55D-7g0jxrQAyRsWK1qyJkK3mf0WGMgM"
 YOUR_CHAT_ID = "5777477925"
