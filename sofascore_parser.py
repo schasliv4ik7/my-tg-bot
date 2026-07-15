@@ -9,6 +9,10 @@ from flask import Flask
 BOT_TOKEN = "8225494453:AAG55D-7g0jxrQAyRsWK1qyJkK3mf0WGMgM"
 YOUR_CHAT_ID = "5777477925"
 
+# --- РАБОЧИЙ ПРОКСИ (Меняй IP:Порт здесь, если бот начнет выдавать ошибки) ---
+# Сейчас используем анонимный HTTPS-прокси Нидерландов
+PROXY_URL = "http://145.220.226.34:8080"
+
 # --- БЕЛЫЙ СПИСОК ТУРНИРОВ ---
 ALLOWED_TOURNAMENTS = ["liga pro", "setka cup", "tt cup"]
 
@@ -20,7 +24,7 @@ MIN_STREAK_FAV = 3
 MIN_WIN_RATE_EQUAL = 55.0
 MIN_STREAK_EQUAL = 2
 
-# Создаем сессию для автоматического сохранения кук (имитация браузера)
+# Создаем сессию
 session = requests.Session()
 session.headers.update({
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -31,12 +35,19 @@ session.headers.update({
     "Cache-Control": "no-cache"
 })
 
+# Применяем прокси только для этой сессии (не ломает деплой Render)
+if PROXY_URL:
+    session.proxies = {
+        "http": PROXY_URL,
+        "https": PROXY_URL
+    }
+
 # Множество для отправленных сигналов
 SENT_SIGNALS = set()
 
 
 def send_telegram_message(text):
-    """Отправляет форматированное сообщение в Telegram."""
+    """Отправляет форматированное сообщение в Telegram (напрямую, без прокси)."""
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": YOUR_CHAT_ID,
@@ -44,6 +55,7 @@ def send_telegram_message(text):
         "parse_mode": "HTML"
     }
     try:
+        # Для телеграма прокси не нужны, делаем запрос через чистый requests
         response = requests.post(url, json=payload, timeout=10)
         if response.status_code != 200:
             print(f"[Telegram] Ошибка отправки: {response.status_code}")
@@ -74,7 +86,7 @@ def make_request(url, silent_404=False):
         print(f"[Ошибка запроса]: HTTP Error {response.status_code}")
         return None
     except Exception as e:
-        print(f"[Ошибка сетевого запроса]: {e}")
+        print(f"[Ошибка сетевого запроса через прокси]: {e}")
         return None
 
 
