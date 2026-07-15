@@ -5,7 +5,7 @@ import threading
 import requests
 from flask import Flask
 
-# Отключаем предупреждения об отсутствии SSL-верификации
+# Отключаем предупреждения об отсутствии SSL-верификации (чтобы логи были чистыми)
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
@@ -13,9 +13,9 @@ requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 BOT_TOKEN = "8225494453:AAG55D-7g0jxrQAyRsWK1qyJkK3mf0WGMgM"
 YOUR_CHAT_ID = "5777477925"
 
-# --- РАБОЧИЙ ПРОКСИ (Меняй IP:Порт здесь, если бот начнет выдавать ошибки) ---
-# Сейчас используем анонимный HTTPS-прокси Нидерландов
-PROXY_URL = "http://145.220.226.34:8080"
+# --- РАБОЧИЙ ПРОКСИ ---
+# Быстрый и стабильный элитный прокси (Нидерланды)
+PROXY_URL = "http://145.220.226.221:8080"
 
 # --- БЕЛЫЙ СПИСОК ТУРНИРОВ ---
 ALLOWED_TOURNAMENTS = ["liga pro", "setka cup", "tt cup"]
@@ -59,7 +59,7 @@ def send_telegram_message(text):
         "parse_mode": "HTML"
     }
     try:
-        # Для телеграма прокси не нужны, делаем запрос через чистый requests
+        # Для телеграма прокси не нужны, делаем запрос напрямую
         response = requests.post(url, json=payload, timeout=10)
         if response.status_code != 200:
             print(f"[Telegram] Ошибка отправки: {response.status_code}")
@@ -82,7 +82,7 @@ def parse_fractional_odds(fraction_str):
 def make_request(url, silent_404=False):
     """Безопасный запрос к API Sofascore через requests.Session."""
     try:
-        # Добавили verify=False, чтобы игнорировать ошибки SSL от прокси
+        # verify=False отключает проверку SSL, решая проблему с самоподписанными сертификатами прокси
         response = session.get(url, timeout=15, verify=False)
         if response.status_code == 200:
             return response.json()
@@ -192,6 +192,7 @@ def monitor_table_tennis():
             matches = get_live_table_tennis_matches()
             if matches:
                 current_live_ids = set()
+                print(f"Найдено матчей в лайве всего: {len(matches)}. Фильтруем по лигам...")
                 
                 for match in matches:
                     event_id = match.get("id")
