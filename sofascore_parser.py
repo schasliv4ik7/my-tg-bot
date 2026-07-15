@@ -65,8 +65,7 @@ def parse_fractional_odds(fraction_str):
 
 
 def make_request(url, silent_404=False):
-    """Безопасный запрос с динамической сменой заголовков и подробным логированием."""
-    # Рандомизируем заголовки для каждого запроса
+    """Безопасный запрос с динамической сменой заголовков."""
     headers = {
         "User-Agent": random.choice(USER_AGENTS),
         "Accept": "application/json, text/plain, */*",
@@ -80,7 +79,7 @@ def make_request(url, silent_404=False):
         response = session.get(url, headers=headers, timeout=15, verify=False)
         if response.status_code == 200:
             return response.json()
-        elif response.status_code == 401 or response.status_code == 407:
+        elif response.status_code in [401, 407]:
             print(f"[КРИТИЧЕСКАЯ ОШИБКА]: Прокси отклонил логин/пароль! Код {response.status_code}")
             return None
         elif response.status_code == 403:
@@ -157,8 +156,12 @@ def is_tournament_allowed(tournament_name):
 
 def monitor_table_tennis():
     print("=== Двухуровневый фильтр сигналов запущен ===")
+    
+    # Возвращаем красивое и полное приветственное сообщение со всеми пунктами
     send_telegram_message(
-        "🤖 <b>Двухуровневый фильтр успешно запущен на Render с динамической защитой!</b>"
+        f"🤖 <b>Двухуровневый фильтр успешно запущен на Render с динамической защитой!</b>\n"
+        f"1️⃣ <b>Камбэк фаворита:</b> винрейт {MIN_WIN_RATE_FAV}%, стрик {MIN_STREAK_FAV}\n"
+        f"2️⃣ <b>Равная игра ТОП:</b> винрейт {MIN_WIN_RATE_EQUAL}%, стрик {MIN_STREAK_EQUAL}"
     )
     
     while True:
@@ -257,7 +260,7 @@ def monitor_table_tennis():
                         print(f"[ОТПРАВЛЕНО] {home_player} - {away_player}")
                         send_telegram_message(msg_text)
                         SENT_SIGNALS.add(event_id)
-                    time.sleep(2.0) # Увеличили задержку между запросами к матчам
+                    time.sleep(2.0)
                 
                 for expired_id in (SENT_SIGNALS - current_live_ids):
                     SENT_SIGNALS.remove(expired_id)
@@ -267,7 +270,7 @@ def monitor_table_tennis():
             print(f"[Фоновая ошибка мониторинга]: {e}")
             
         print("Сканирование завершено. Ожидание 45 сек...")
-        time.sleep(45) # Увеличили общий кулдаун, чтобы не спамить прокси
+        time.sleep(45)
 
 
 # --- МИКРО-ВЕБ-СЕРВЕР ---
