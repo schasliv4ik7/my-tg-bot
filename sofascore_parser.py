@@ -1,11 +1,8 @@
 import os
 import json
-import urllib.request
-import urllib.parse
 import time
-import ssl
 import threading
-from urllib.error import HTTPError
+import requests
 from flask import Flask
 
 # --- НАСТРОЙКИ TELEGRAM ---
@@ -23,18 +20,16 @@ MIN_STREAK_FAV = 3
 MIN_WIN_RATE_EQUAL = 55.0
 MIN_STREAK_EQUAL = 2
 
-# Заголовки для имитации браузера
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+# Создаем сессию для автоматического сохранения кук (имитация браузера)
+session = requests.Session()
+session.headers.update({
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Accept": "application/json, text/plain, */*",
     "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
     "Referer": "https://www.sofascore.com/",
     "Origin": "https://www.sofascore.com",
     "Cache-Control": "no-cache"
-}
-
-# Отключение проверки SSL
-SSL_CONTEXT = ssl._create_unverified_context()
+})
 
 # Множество для отправленных сигналов
 SENT_SIGNALS = set()
@@ -49,19 +44,12 @@ def send_telegram_message(text):
         "parse_mode": "HTML"
     }
     try:
-        # Кодируем данные в формат JSON и добавляем правильный заголовок контента
-        data = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(
-            url, 
-            data=data, 
-            headers={"Content-Type": "application/json"}, 
-            method="POST"
-        )
-        with urllib.request.urlopen(req, timeout=10, context=SSL_CONTEXT) as response:
-            if response.status != 200:
-                print(f"[Telegram] Ошибка отправки: {response.status}")
+        response = requests.post(url, json=payload, timeout=10)
+        if response.status_code != 200:
+            print(f"[Telegram] Ошибка отправки: {response.status_code}")
     except Exception as e:
         print(f"[Telegram] Ошибка подключения: {e}")
+
 
 def parse_fractional_odds(fraction_str):
     """Преобразует дробный коэффициент в десятичный (float)."""
@@ -76,17 +64,14 @@ def parse_fractional_odds(fraction_str):
 
 
 def make_request(url, silent_404=False):
-    """Безопасный запрос к API Sofascore."""
+    """Безопасный запрос к API Sofascore через requests.Session."""
     try:
-        req = urllib.request.Request(url, headers=HEADERS)
-        with urllib.request.urlopen(req, timeout=15, context=SSL_CONTEXT) as response:
-            if response.status == 200:
-                return json.loads(response.read().decode('utf-8'))
+        response = session.get(url, timeout=15)
+        if response.status_code == 200:
+            return response.json()
+        elif response.status_code == 404 and silent_404:
             return None
-    except HTTPError as e:
-        if e.code == 404 and silent_404:
-            return None
-        print(f"[Ошибка запроса]: HTTP Error {e.code}: {e.reason}")
+        print(f"[Ошибка запроса]: HTTP Error {response.status_code}")
         return None
     except Exception as e:
         print(f"[Ошибка сетевого запроса]: {e}")
@@ -320,16 +305,13 @@ def monitor_table_tennis():
 # --- МИКРО-ВЕБ-СЕРВЕР ДЛЯ RENDER ---
 app = Flask(__name__)
 
-# Этот декоратор гарантирует, что поток мониторинга запустится 
-# ровно один раз при первом обращении к серверу
 @app.before_request
 def start_monitoring_thread():
-    # Проверяем, запущен ли уже поток, чтобы не плодить копии
     for thread in threading.enumerate():
         if thread.name == "SofascoreMonitorThread":
             return
             
-    print("[Flask] Запуск фонового потока мониторинга...")
+    print("[Flask] Запуск фоного потока мониторинга...")
     monitor_thread = threading.Thread(
         target=monitor_table_tennis, 
         name="SofascoreMonitorThread", 
@@ -342,6 +324,5 @@ def home():
     return "Бот активен, веб-порт открыт, сканирование идет 24/7!"
 
 if __name__ == "__main__":
-    # Запуск веб-сервера Flask на динамическом порту Render
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
