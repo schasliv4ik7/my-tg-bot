@@ -82,7 +82,8 @@ def parse_fractional_odds(fraction_str):
 def make_request(url, silent_404=False):
     """Безопасный запрос к API Sofascore через requests.Session."""
     try:
-        response = session.get(url, timeout=15)
+        # Добавили verify=False, чтобы игнорировать ошибки SSL от прокси
+        response = session.get(url, timeout=15, verify=False)
         if response.status_code == 200:
             return response.json()
         elif response.status_code == 404 and silent_404:
