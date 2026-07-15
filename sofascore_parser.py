@@ -320,14 +320,28 @@ def monitor_table_tennis():
 # --- МИКРО-ВЕБ-СЕРВЕР ДЛЯ RENDER ---
 app = Flask(__name__)
 
+# Этот декоратор гарантирует, что поток мониторинга запустится 
+# ровно один раз при первом обращении к серверу
+@app.before_request
+def start_monitoring_thread():
+    # Проверяем, запущен ли уже поток, чтобы не плодить копии
+    for thread in threading.enumerate():
+        if thread.name == "SofascoreMonitorThread":
+            return
+            
+    print("[Flask] Запуск фонового потока мониторинга...")
+    monitor_thread = threading.Thread(
+        target=monitor_table_tennis, 
+        name="SofascoreMonitorThread", 
+        daemon=True
+    )
+    monitor_thread.start()
+
 @app.route('/')
 def home():
     return "Бот активен, веб-порт открыт, сканирование идет 24/7!"
 
 if __name__ == "__main__":
-    # Запуск логики парсера в отдельном независимом потоке
-    threading.Thread(target=monitor_table_tennis, daemon=True).start()
-    
     # Запуск веб-сервера Flask на динамическом порту Render
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
