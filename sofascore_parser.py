@@ -13,9 +13,8 @@ requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 BOT_TOKEN = "8225494453:AAG55D-7g0jxrQAyRsWK1qyJkK3mf0WGMgM"
 YOUR_CHAT_ID = "5777477925"
 
-# --- РАБОЧИЙ ПРОКСИ ---
-# Быстрый и стабильный элитный прокси (Нидерланды)
-PROXY_URL = "http://145.220.226.221:8080"
+# --- ТВОЙ ПРИВАТНЫЙ ПРОКСИ С АВТОРИЗАЦИЕЙ ---
+PROXY_URL = "http://TvSYGxHL:H19ycY2V@158.46.145.135:64310"
 
 # --- БЕЛЫЙ СПИСОК ТУРНИРОВ ---
 ALLOWED_TOURNAMENTS = ["liga pro", "setka cup", "tt cup"]
@@ -39,7 +38,7 @@ session.headers.update({
     "Cache-Control": "no-cache"
 })
 
-# Применяем прокси только для этой сессии (не ломает деплой Render)
+# Применяем приватный прокси
 if PROXY_URL:
     session.proxies = {
         "http": PROXY_URL,
@@ -82,7 +81,6 @@ def parse_fractional_odds(fraction_str):
 def make_request(url, silent_404=False):
     """Безопасный запрос к API Sofascore через requests.Session."""
     try:
-        # verify=False отключает проверку SSL, решая проблему с самоподписанными сертификатами прокси
         response = session.get(url, timeout=15, verify=False)
         if response.status_code == 200:
             return response.json()
