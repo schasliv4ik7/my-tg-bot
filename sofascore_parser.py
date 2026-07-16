@@ -3,15 +3,13 @@ import time
 import random
 import threading
 import httpx
-from flask import Flask
+from flask import Flask, Response
 
 # --- НАСТРОЙКИ TELEGRAM ---
 BOT_TOKEN = "8225494453:AAG55D-7g0jxrQAyRsWK1qyJkK3mf0WGMgM"
 YOUR_CHAT_ID = "5777477925"
 
 # --- ТВОЙ ПРОКСИ ---
-# Если твой прокси поддерживает только SOCKS5, мы пробуем обернуть его через http-протокол.
-# Для 100% стабильности рекомендуется использовать HTTP-прокси формат: "http://user:pass@ip:port"
 PROXY_URL = "socks5://TvSYGxHL:H19ycY2V@158.46.145.135:64311"
 
 # Список популярных мобильных User-Agent
@@ -23,8 +21,7 @@ MOBILE_USER_AGENTS = [
 SENT_SIGNALS = set()
 TARGET_LEAGUES = ["setka cup", "liga pro", "tt cup", "win cup", "challenger series"]
 
-# Настраиваем чистый транспорт без пула соединений для избежания UNEXPECTED_EOF
-# Закрываем соединение сразу после каждого запроса (Connection: close)
+# Настраиваем чистый транспорт во избежание SSL Handshake ошибок
 limits = httpx.Limits(max_keepalive_connections=0, max_connections=5)
 client = httpx.Client(
     proxy=PROXY_URL,
@@ -42,7 +39,7 @@ def send_telegram_message(text):
         "parse_mode": "HTML"
     }
     try:
-        # Отправляем напрямую без прокси (на Render это работает отлично!)
+        # Отправляем напрямую без прокси (на Render это работает отлично)
         with httpx.Client(verify=False) as tg_client:
             tg_client.post(url, json=payload, timeout=10.0)
         print("[Telegram] Сообщение отправлено!", flush=True)
@@ -51,7 +48,6 @@ def send_telegram_message(text):
 
 
 def get_aiscore_live():
-    # Используем оригинальный HTTPS эндпоинт, но добавляем заголовки закрытия соединения
     url = "https://isb.aiscore.com/api/v1/sport/table-tennis/events/live"
     headers = {
         "User-Agent": random.choice(MOBILE_USER_AGENTS),
@@ -59,7 +55,7 @@ def get_aiscore_live():
         "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
         "Origin": "https://m.aiscore.com",
         "Referer": "https://m.aiscore.com/",
-        "Connection": "close"  # Указываем серверу закрыть сессию, предотвращая зависание SSL-пула
+        "Connection": "close"
     }
     try:
         print("[AiScore Сеть] Делаем запрос к Live API...", flush=True)
@@ -75,8 +71,10 @@ def get_aiscore_live():
 
 
 def monitor_aiscore():
+    # Небольшая задержка перед стартом мониторинга, чтобы Flask успел запуститься
+    time.sleep(5)
     print("=== [ПОТОК] СТАРТ МОНИТОРИНГА AISCORE ===", flush=True)
-    send_telegram_message("📱 <b>Мониторинг AiScore запущен!</b>\nЖдем первые Live-матчи.")
+    send_telegram_message("📱 <b>Бот мониторинга AiScore успешно запущен!</b>\nЖдем первые Live-матчи.")
     
     while True:
         try:
@@ -150,13 +148,28 @@ def monitor_aiscore():
 # --- WEB SERVER ДЛЯ RENDER ---
 app = Flask(__name__)
 
-@app.route('/')
-def home():
-    return "HTTPX Бот работает!"
+# Принудительно отключаем жесткую проверку хостов во Flask для локальных пингов Render
+app.config['SERVER_NAME'] = None
 
-print("[Система] Инициализация фонового потока...", flush=True)
-monitor_thread = threading.Thread(target=monitor_aiscore, daemon=True)
-monitor_thread.start()
+# Обработчик для HEAD-запросов (health check от Render)
+@app.route('/', methods=['GET', 'HEAD'])
+def home():
+    return Response("HTTPX Бот работает!", status=200)
+
+# Функция безопасного запуска потока
+def start_monitoring():
+    # Проверяем, что поток еще не запущен в текущем процессе gunicorn
+    for thread in threading.enumerate():
+        if thread.name == "AiScoreMonitor":
+            return
+    print("[Система] Инициализация фонового потока...", flush=True)
+    monitor_thread = threading.Thread(target=monitor_aiscore, name="AiScoreMonitor", daemon=True)
+    monitor_thread.start()
+
+# Запускаем поток при первом запросе к приложению, чтобы Flask гарантированно был готов
+@app.before_request
+def initialize():
+    start_monitoring()
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
