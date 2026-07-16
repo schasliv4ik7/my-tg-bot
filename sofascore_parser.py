@@ -21,32 +21,34 @@ PROXIES = [
 ]
 
 def monitor():
-    print("--- [СТАРТ] Мониторинг запущен принудительно ---", flush=True)
+    print("--- [СИСТЕМА] Поток мониторинга начал выполнение ---", flush=True)
     while True:
-        # Берем случайный прокси из списка
-        proxy = random.choice(PROXIES)
-        print(f"--- Пытаюсь использовать прокси: {proxy.split('@')[1]} ---", flush=True)
-        
         try:
-            client = httpx.Client(proxies={"http://": proxy, "https://": proxy}, timeout=10.0, verify=False)
-            resp = client.get("https://api.sofascore.com/api/v1/sport/table-tennis/events/live", 
-                             headers={"User-Agent": "Mozilla/5.0"}, timeout=10.0)
+            proxy = random.choice(PROXIES)
+            print(f"--- [СЕТЬ] Попытка через: {proxy.split('@')[1]} ---", flush=True)
             
-            print(f"--- Статус ответа: {resp.status_code} ---", flush=True)
+            with httpx.Client(proxies={"http://": proxy, "https://": proxy}, timeout=15.0, verify=False) as client:
+                resp = client.get("https://api.sofascore.com/api/v1/sport/table-tennis/events/live", 
+                                 headers={"User-Agent": "Mozilla/5.0"}, timeout=15.0)
+                
+            print(f"--- [СЕТЬ] Статус ответа: {resp.status_code} ---", flush=True)
             if resp.status_code == 200:
-                print(f"--- УСПЕХ! Данные получены ---", flush=True)
+                print("--- [УСПЕХ] Данные получены! ---", flush=True)
             else:
-                print(f"--- Ошибка: {resp.status_code}. Пробуем другой прокси через 60 сек ---", flush=True)
+                print(f"--- [ОШИБКА] Состояние: {resp.status_code} ---", flush=True)
         except Exception as e:
-            print(f"--- Критическая ошибка прокси: {e} ---", flush=True)
+            print(f"--- [КРИТИЧЕСКАЯ ОШИБКА] {str(e)} ---", flush=True)
             
-        time.sleep(60)
+        time.sleep(30)
 
 @app.route('/')
 def home():
     return "Bot is running"
 
-if __name__ == "__main__":
-    # Запускаем мониторинг как отдельный поток
+# Принудительный запуск мониторинга при старте Flask
+@app.before_first_request
+def start_monitor_thread():
     threading.Thread(target=monitor, daemon=True).start()
+
+if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
