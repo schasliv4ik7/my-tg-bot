@@ -80,7 +80,7 @@ def parse_aiscore_live(html_text):
     matches = []
     json_data = None
     
-    # 1. Сверхгибкий поиск __NEXT_DATA__ (игнорирует порядок атрибутов в теге script)
+    # 1. Сверхгибкий поиск __NEXT_DATA__
     next_data_match = re.search(r'<script[^>]*id="__NEXT_DATA__"[^>]*>(.*?)</script>', html_text, re.DOTALL)
     if next_data_match:
         try:
@@ -99,13 +99,12 @@ def parse_aiscore_live(html_text):
             except Exception as e:
                 print(f"[AiScore PC] Ошибка парсинга __INITIAL_STATE__: {e}")
 
-    # 3. Полное сканирование всех script блоков на наличие признаков матчей (на крайний случай)
+    # 3. Полное сканирование всех script блоков на наличие признаков матчей
     if not json_data:
         print("[AiScore PC] Стандартные теги не найдены. Запускаем глубокое сканирование скриптов...")
         script_contents = re.findall(r'<script[^>]*>(.*?)</script>', html_text, re.DOTALL)
         for content in script_contents:
             if "matchList" in content or "liveMatches" in content or "tournamentName" in content:
-                # Пробуем вычленить фигурные скобки с JSON
                 json_bound = re.search(r'({.*})', content, re.DOTALL)
                 if json_bound:
                     try:
@@ -135,7 +134,6 @@ def parse_aiscore_live(html_text):
                             return res
                 return None
 
-            # Ищем списки матчей в структуре данных
             match_list = find_key_recursive(json_data, "matches") or \
                          find_key_recursive(json_data, "matchList") or \
                          find_key_recursive(json_data, "liveMatches") or \
@@ -153,7 +151,6 @@ def parse_aiscore_live(html_text):
                         continue
                     
                     status = str(m.get("status", m.get("statusId", "")))
-                    # В лайве ли матч (статус 2 или явный флаг)
                     if status == "2" or m.get("isLive", False) or m.get("live", False):
                         match_info = {
                             "id": str(m.get("id", m.get("matchId", random.randint(100000, 999999)))),
@@ -170,14 +167,12 @@ def parse_aiscore_live(html_text):
         except Exception as e:
             print(f"[AiScore PC] Ошибка разбора JSON-дерева: {e}")
             
-    # 4. Резервный HTML-парсер регулярными выражениями (если JS-данные вообще вырезаны)
+    # 4. Резервный HTML-парсер
     if not matches:
         print("[AiScore PC] Попытка прямого разбора HTML-верстки...")
-        # Ищем блоки матчей на ПК-версии сайта по характерным классам
         html_blocks = re.findall(r'<div[^>]*class="[^"]*match-item[^"]*"[^>]*>(.*?)</div>\s*</div>', html_text, re.DOTALL)
         for block in html_blocks:
             try:
-                # Извлекаем имена игроков и счет
                 names = re.findall(r'<span[^>]*class="[^"]*name[^"]*"[^>]*>(.*?)</span>', block)
                 scores = re.findall(r'<span[^>]*class="[^"]*score[^"]*"[^>]*>(\d+)</span>', block)
                 
@@ -189,7 +184,7 @@ def parse_aiscore_live(html_text):
                     
                     matches.append({
                         "id": str(random.randint(100000, 999999)),
-                        "tournament": "liga pro", # Дефолт для ручного парсинга
+                        "tournament": "liga pro", 
                         "home": home_p,
                         "away": away_p,
                         "home_score": home_s,
@@ -281,4 +276,3 @@ monitor_thread.start()
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
-й
