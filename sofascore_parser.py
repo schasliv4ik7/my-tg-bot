@@ -36,38 +36,47 @@ def send_telegram_message(text):
         req = urllib.request.Request(url, data=data, method="POST")
         with urllib.request.urlopen(req, timeout=10, context=SSL_CONTEXT) as response:
             if response.status == 200:
-                print("[Telegram] Тестовое сообщение отправлено!")
+                print("[Telegram] Тестовое сообщение отправлено!", flush=True)
     except Exception as e:
-        print(f"[Telegram] Ошибка отправки: {e}")
+        print(f"[Telegram] Ошибка отправки сообщения: {e}", flush=True)
 
 
 def make_request(url):
     try:
+        print(f"[Сеть] Делаем запрос к {url}...", flush=True)
         req = urllib.request.Request(url, headers=HEADERS)
         with urllib.request.urlopen(req, timeout=15, context=SSL_CONTEXT) as response:
+            print(f"[Сеть] Ответ сервера: {response.status}", flush=True)
             if response.status == 200:
                 return json.loads(response.read().decode('utf-8'))
             return None
+    except HTTPError as e:
+        print(f"[Сеть] HTTP Ошибка {e.code}: {e.reason}", flush=True)
+        return None
     except Exception as e:
-        print(f"[Ошибка сети]: {e}")
+        print(f"[Сеть] Ошибка запроса: {e}", flush=True)
         return None
 
 
 def get_live_table_tennis_matches():
     url = "https://api.sofascore.com/api/v1/sport/table-tennis/events/live"
     data = make_request(url)
-    return data.get("events", []) if data else []
+    if data:
+        return data.get("events", [])
+    return []
 
 
 def monitor_table_tennis():
-    print("=== ТЕСТОВЫЙ ЗАПУСК МОНИТОРИНГА ===")
+    print("=== [ПОТОК] Фоновый мониторинг запущен! ===", flush=True)
     send_telegram_message("🧪 <b>Тестовый режим запущен!</b>\nБот пришлет абсолютно ВСЕ лайв-матчи без фильтров.")
     
     while True:
         try:
+            print("[Мониторинг] Начинаем круг сканирования...", flush=True)
             matches = get_live_table_tennis_matches()
+            
             if matches:
-                print(f"[Тест] Найдено {len(matches)} матчей в лайве SofaScore.")
+                print(f"[Мониторинг] Найдено {len(matches)} матчей в лайве SofaScore.", flush=True)
                 current_live_ids = set()
                 
                 for match in matches:
@@ -83,7 +92,6 @@ def monitor_table_tennis():
                     home_score = match.get("homeScore", {}).get("display", 0)
                     away_score = match.get("awayScore", {}).get("display", 0)
                     
-                    # Отправляем абсолютно любой найденный лайв-матч!
                     msg_text = (
                         f"🧪 <b>ТЕСТОВЫЙ МАТЧ НАЙДЕН!</b>\n\n"
                         f"🏆 Лига: {tournament_name}\n"
@@ -92,21 +100,21 @@ def monitor_table_tennis():
                         f"🆔 Event ID: <code>{event_id}</code>"
                     )
                     
+                    print(f"[Мониторинг] Нашли новый матч ID {event_id}. Отправляем в TG...", flush=True)
                     send_telegram_message(msg_text)
                     SENT_SIGNALS.add(event_id)
                     time.sleep(1)
                 
-                # Очистка старых ID
                 expired_matches = SENT_SIGNALS - current_live_ids
                 for expired_id in expired_matches:
                     SENT_SIGNALS.remove(expired_id)
             else:
-                print("[Тест] На данный момент на SofaScore нет активных лайв-игр.")
+                print("[Мониторинг] На SofaScore сейчас 0 активных лайв-игр.", flush=True)
                 
         except Exception as e:
-            print(f"[Тест] Ошибка в цикле: {e}")
+            print(f"[Мониторинг] Критическая ошибка в цикле: {e}", flush=True)
             
-        print("Тестовое сканирование завершено. Ждем 30 секунд...")
+        print("[Мониторинг] Круг завершен. Ждем 30 секунд...", flush=True)
         time.sleep(30)
 
 
@@ -117,7 +125,10 @@ app = Flask(__name__)
 def home():
     return "Тестовый бот запущен!"
 
+# Создаем и принудительно стартуем поток перед запуском Flask
+monitor_thread = threading.Thread(target=monitor_table_tennis, daemon=True)
+monitor_thread.start()
+
 if __name__ == "__main__":
-    threading.Thread(target=monitor_table_tennis, daemon=True).start()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
