@@ -5,6 +5,7 @@ import threading
 import httpx
 from flask import Flask, Response
 
+# Инициализируем app на самом верхнем уровне
 app = Flask(__name__)
 
 PROXIES = [
@@ -21,34 +22,23 @@ PROXIES = [
 ]
 
 def monitor():
-    print("--- [СИСТЕМА] Поток мониторинга начал выполнение ---", flush=True)
+    print("--- [СИСТЕМА] Поток мониторинга запущен ---", flush=True)
     while True:
+        proxy = random.choice(PROXIES)
         try:
-            proxy = random.choice(PROXIES)
-            print(f"--- [СЕТЬ] Попытка через: {proxy.split('@')[1]} ---", flush=True)
-            
-            with httpx.Client(proxies={"http://": proxy, "https://": proxy}, timeout=15.0, verify=False) as client:
-                resp = client.get("https://api.sofascore.com/api/v1/sport/table-tennis/events/live", 
-                                 headers={"User-Agent": "Mozilla/5.0"}, timeout=15.0)
-                
-            print(f"--- [СЕТЬ] Статус ответа: {resp.status_code} ---", flush=True)
-            if resp.status_code == 200:
-                print("--- [УСПЕХ] Данные получены! ---", flush=True)
-            else:
-                print(f"--- [ОШИБКА] Состояние: {resp.status_code} ---", flush=True)
+            with httpx.Client(proxies={"http://": proxy, "https://": proxy}, timeout=10.0, verify=False) as client:
+                resp = client.get("https://api.sofascore.com/api/v1/sport/table-tennis/events/live", timeout=10.0)
+            print(f"--- [СЕТЬ] Прокси {proxy.split('@')[1]} | Статус: {resp.status_code} ---", flush=True)
         except Exception as e:
-            print(f"--- [КРИТИЧЕСКАЯ ОШИБКА] {str(e)} ---", flush=True)
-            
-        time.sleep(30)
+            print(f"--- [ОШИБКА] {e} ---", flush=True)
+        time.sleep(60)
+
+# Запускаем мониторинг при импорте модуля (это стандарт для Render/Gunicorn)
+threading.Thread(target=monitor, daemon=True).start()
 
 @app.route('/')
 def home():
     return "Bot is running"
-
-# Принудительный запуск мониторинга при старте Flask
-@app.before_first_request
-def start_monitor_thread():
-    threading.Thread(target=monitor, daemon=True).start()
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
