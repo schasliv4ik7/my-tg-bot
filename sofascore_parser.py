@@ -38,7 +38,6 @@ USER_AGENTS = [
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 ]
 
-# --- НАСТРОЙКА СЕССИИ С ИЗОЛЯЦИЕЙ ТРАФИКА ---
 session = requests.Session()
 if PROXY_URL:
     session.proxies = {"http": PROXY_URL, "https": PROXY_URL}
@@ -81,62 +80,124 @@ def parse_aiscore_live(html_text):
     matches = []
     json_data = None
     
-    # 1. Поиск в __NEXT_DATA__
-    next_data_match = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', html_text, re.DOTALL)
+    # 1. Сверхгибкий поиск __NEXT_DATA__ (игнорирует порядок атрибутов в теге script)
+    next_data_match = re.search(r'<script[^>]*id="__NEXT_DATA__"[^>]*>(.*?)</script>', html_text, re.DOTALL)
     if next_data_match:
         try:
             json_data = json.loads(next_data_match.group(1))
-            print("[AiScore PC] Нашли сырой JSON в __NEXT_DATA__")
+            print("[AiScore PC] Успешно извлечен JSON из __NEXT_DATA__")
         except Exception as e:
             print(f"[AiScore PC] Ошибка парсинга __NEXT_DATA__: {e}")
             
-    # 2. Альтернативный поиск в INITIAL_STATE
+    # 2. Поиск window.__INITIAL_STATE__
     if not json_data:
         initial_state_match = re.search(r'window\.__INITIAL_STATE__\s*=\s*({.*?});', html_text, re.DOTALL)
         if initial_state_match:
             try:
                 json_data = json.loads(initial_state_match.group(1))
-                print("[AiScore PC] Нашли сырой JSON в __INITIAL_STATE__")
+                print("[AiScore PC] Успешно извлечен JSON из __INITIAL_STATE__")
             except Exception as e:
                 print(f"[AiScore PC] Ошибка парсинга __INITIAL_STATE__: {e}")
 
+    # 3. Полное сканирование всех script блоков на наличие признаков матчей (на крайний случай)
+    if not json_data:
+        print("[AiScore PC] Стандартные теги не найдены. Запускаем глубокое сканирование скриптов...")
+        script_contents = re.findall(r'<script[^>]*>(.*?)</script>', html_text, re.DOTALL)
+        for content in script_contents:
+            if "matchList" in content or "liveMatches" in content or "tournamentName" in content:
+                # Пробуем вычленить фигурные скобки с JSON
+                json_bound = re.search(r'({.*})', content, re.DOTALL)
+                if json_bound:
+                    try:
+                        candidate = json.loads(json_bound.group(1))
+                        if isinstance(candidate, dict):
+                            json_data = candidate
+                            print("[AiScore PC] Найден подходящий JSON-объект в глубоких скриптах!")
+                            break
+                    except:
+                        continue
+
     if json_data:
         try:
-            props = json_data.get("props", {})
-            page_props = props.get("pageProps", {})
-            initial_state = page_props.get("initialState", page_props)
-            
-            match_list = (
-                initial_state.get("matches", []) or 
-                initial_state.get("matchList", []) or 
-                initial_state.get("liveMatches", []) or
-                json_data.get("matches", [])
-            )
-            
-            print(f"[AiScore PC] Всего матчей обнаружено в JSON: {len(match_list)}")
-            
-            for m in match_list:
-                tournament_name = m.get("tournamentName", m.get("compName", "Unknown")).lower()
-                
-                # Фильтр по турнирам из белого списка
-                if not any(t in tournament_name for t in ALLOWED_TOURNAMENTS):
-                    continue
-                
-                status = str(m.get("status", m.get("statusId", "")))
-                if status == "2" or m.get("isLive", False):
-                    match_info = {
-                        "id": str(m.get("id", m.get("matchId", random.randint(100000, 999999)))),
-                        "tournament": tournament_name,
-                        "home": m.get("homeName", m.get("homeTeamName", "Игрок 1")),
-                        "away": m.get("awayName", m.get("awayTeamName", "Игрок 2")),
-                        "home_score": int(m.get("homeScore", m.get("homeSetScore", 0))),
-                        "away_score": int(m.get("awayScore", m.get("awaySetScore", 0)))
-                    }
-                    matches.append(match_info)
-                    print(f"[AiScore PC] Найден Live-матч: {match_info['home']} vs {match_info['away']} ({match_info['tournament']})")
+            # Рекурсивный поиск ключей с матчами в глубине JSON-дерева
+            def find_key_recursive(data, key_name):
+                if isinstance(data, dict):
+                    if key_name in data:
+                        return data[key_name]
+                    for k, v in data.items():
+                        res = find_key_recursive(v, key_name)
+                        if res is not None:
+                            return res
+                elif isinstance(data, list):
+                    for item in data:
+                        res = find_key_recursive(item, key_name)
+                        if res is not None:
+                            return res
+                return None
+
+            # Ищем списки матчей в структуре данных
+            match_list = find_key_recursive(json_data, "matches") or \
+                         find_key_recursive(json_data, "matchList") or \
+                         find_key_recursive(json_data, "liveMatches") or \
+                         find_key_recursive(json_data, "list")
+
+            if match_list and isinstance(match_list, list):
+                print(f"[AiScore PC] Обнаружено матчей в JSON: {len(match_list)}")
+                for m in match_list:
+                    if not isinstance(m, dict):
+                        continue
+                        
+                    tournament_name = str(m.get("tournamentName", m.get("compName", m.get("tournament", "Unknown")))).lower()
+                    
+                    if not any(t in tournament_name for t in ALLOWED_TOURNAMENTS):
+                        continue
+                    
+                    status = str(m.get("status", m.get("statusId", "")))
+                    # В лайве ли матч (статус 2 или явный флаг)
+                    if status == "2" or m.get("isLive", False) or m.get("live", False):
+                        match_info = {
+                            "id": str(m.get("id", m.get("matchId", random.randint(100000, 999999)))),
+                            "tournament": tournament_name,
+                            "home": m.get("homeName", m.get("homeTeamName", m.get("homeTeam", {}).get("name", "Игрок 1"))),
+                            "away": m.get("awayName", m.get("awayTeamName", m.get("awayTeam", {}).get("name", "Игрок 2"))),
+                            "home_score": int(m.get("homeScore", m.get("homeSetScore", m.get("homeScoreTotal", 0)))),
+                            "away_score": int(m.get("awayScore", m.get("awaySetScore", m.get("awayScoreTotal", 0))))
+                        }
+                        matches.append(match_info)
+                        print(f"[AiScore PC] Добавлен Live-матч: {match_info['home']} vs {match_info['away']} ({match_info['tournament']})")
+            else:
+                print("[AiScore PC] Списки матчей в структуре JSON не найдены.")
         except Exception as e:
-            print(f"[AiScore PC] Ошибка обработки структуры JSON-дерева: {e}")
+            print(f"[AiScore PC] Ошибка разбора JSON-дерева: {e}")
             
+    # 4. Резервный HTML-парсер регулярными выражениями (если JS-данные вообще вырезаны)
+    if not matches:
+        print("[AiScore PC] Попытка прямого разбора HTML-верстки...")
+        # Ищем блоки матчей на ПК-версии сайта по характерным классам
+        html_blocks = re.findall(r'<div[^>]*class="[^"]*match-item[^"]*"[^>]*>(.*?)</div>\s*</div>', html_text, re.DOTALL)
+        for block in html_blocks:
+            try:
+                # Извлекаем имена игроков и счет
+                names = re.findall(r'<span[^>]*class="[^"]*name[^"]*"[^>]*>(.*?)</span>', block)
+                scores = re.findall(r'<span[^>]*class="[^"]*score[^"]*"[^>]*>(\d+)</span>', block)
+                
+                if len(names) >= 2:
+                    home_p = names[0].strip()
+                    away_p = names[1].strip()
+                    home_s = int(scores[0]) if len(scores) >= 1 else 0
+                    away_s = int(scores[1]) if len(scores) >= 2 else 0
+                    
+                    matches.append({
+                        "id": str(random.randint(100000, 999999)),
+                        "tournament": "liga pro", # Дефолт для ручного парсинга
+                        "home": home_p,
+                        "away": away_p,
+                        "home_score": home_s,
+                        "away_score": away_s
+                    })
+            except Exception as e:
+                continue
+                
     return matches
 
 def get_player_history_stats(player_name):
@@ -155,7 +216,7 @@ def get_player_history_stats(player_name):
 
 def monitor_table_tennis():
     print("[Мониторинг] Поток успешно стартовал!")
-    send_telegram_message("🤖 <b>Бот успешно запущен на ПК-версии AiScore!</b>")
+    send_telegram_message("🤖 <b>Бот успешно перезапущен с умным ПК-парсером AiScore!</b>")
     
     while True:
         try:
@@ -215,9 +276,9 @@ app = Flask(__name__)
 def home():
     return "Бот активен и парсит ПК-версию AiScore!"
 
-# Запуск фонового процесса мониторинга СРАЗУ при импорте/старте приложения
 monitor_thread = threading.Thread(target=monitor_table_tennis, name="AiScorePCMonitorThread", daemon=True)
 monitor_thread.start()
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+й
