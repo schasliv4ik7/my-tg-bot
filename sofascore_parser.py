@@ -22,11 +22,10 @@ SENT_SIGNALS = set()
 TARGET_LEAGUES = ["setka cup", "liga pro", "tt cup", "win cup", "challenger series"]
 
 # Настраиваем клиент HTTPX с поддержкой прокси
-# HTTPX автоматически и корректно оборачивает SSL поверх SOCKS5
 limits = httpx.Limits(max_keepalive_connections=5, max_connections=10)
 client = httpx.Client(
-    proxies=PROXY_URL,
-    verify=False,  # игнорируем SSL-ошибки, чтобы избежать блокировок
+    proxy=PROXY_URL,  # Здесь была ошибка proxies -> proxy исправлено!
+    verify=False,
     limits=limits,
     timeout=15.0
 )
@@ -40,7 +39,6 @@ def send_telegram_message(text):
         "parse_mode": "HTML"
     }
     try:
-        # Для отправки в ТГ можно использовать прямой запрос без прокси (или через него)
         with httpx.Client(verify=False) as tg_client:
             tg_client.post(url, json=payload, timeout=10.0)
         print("[Telegram] Сообщение отправлено!", flush=True)
