@@ -35,7 +35,7 @@ USER_AGENTS = [
 session = requests.Session()
 if PROXY_URL:
     session.proxies = {"http": PROXY_URL, "https": PROXY_URL}
-    session.trust_env = False  # Исключает утечку трафика мимо прокси
+    session.trust_env = False  # Полностью исключает утечку трафика мимо прокси на Render
 
 SENT_SIGNALS = set()
 
@@ -45,38 +45,58 @@ def send_telegram_message(text):
     try:
         requests.post(url, json=payload, timeout=10)
     except Exception as e:
-        print(f"[Telegram] Ошибка: {e}")
+        print(f"[Telegram] Ошибка отправки: {e}")
 
 def make_request(url, silent_404=False):
-    headers = {"User-Agent": random.choice(USER_AGENTS), "Connection": "keep-alive"}
+    headers = {
+        "User-Agent": random.choice(USER_AGENTS),
+        "Connection": "keep-alive",
+        "Accept": "*/*",
+        "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7"
+    }
     try:
         response = session.get(url, headers=headers, timeout=15, verify=False)
-        if response.status_code == 200: return response.json()
-        if response.status_code == 403: print("[Ошибка]: 403 Forbidden (Блокировка IP)")
+        if response.status_code == 200:
+            return response.json()
+        if response.status_code == 403:
+            print("[Ошибка]: 403 Forbidden (Блокировка IP-адреса сайтом Sofascore)")
         return None
     except Exception as e:
-        print(f"[Ошибка запроса]: {e}")
+        if not silent_404:
+            print(f"[Ошибка запроса]: {e}")
         return None
 
 def get_player_stats(match_id, side):
     data = make_request(f"https://api.sofascore.com/api/v1/event/{match_id}/team-events/{side}", silent_404=True)
-    if not data or "events" not in data: return {"symbols": "Нет данных", "win_rate": 0.0, "streak": 0}
+    if not data or "events" not in data:
+        return {"symbols": "Нет данных", "win_rate": 0.0, "streak": 0}
     
     events = data.get("events", [])[:5]
     wins = []
     for e in events:
         h_score = e.get("homeScore", {}).get("display")
         a_score = e.get("awayScore", {}).get("display")
-        if h_score is None or a_score is None: continue
+        if h_score is None or a_score is None:
+            continue
         target_id = e.get("homeTeam", {}).get("id") if side == "home" else e.get("awayTeam", {}).get("id")
-        wins.append((h_score > a_score) if target_id == e.get("homeTeam", {}).get("id") else (a_score > h_score))
+        is_home = (target_id == e.get("homeTeam", {}).get("id"))
+        if is_home:
+            wins.append(h_score > a_score)
+        else:
+            wins.append(a_score > h_score)
         
     win_rate = (wins.count(True) / len(wins)) * 100 if wins else 0
     streak = 0
     for w in wins:
-        if w: streak += 1
-        else: break
-    return {"symbols": "".join(["🟢" if w else "🔴" for w in wins]), "win_rate": round(win_rate, 1), "streak": streak}
+        if w:
+            streak += 1
+        else:
+            break
+    return {
+        "symbols": "".join(["🟢" if w else "🔴" for w in wins]),
+        "win_rate": round(win_rate, 1),
+        "streak": streak
+    }
 
 def monitor_table_tennis():
     send_telegram_message(
@@ -88,19 +108,86 @@ def monitor_table_tennis():
         matches = make_request("https://api.sofascore.com/api/v1/sport/table-tennis/events/live")
         if matches and "events" in matches:
             for m in matches["events"]:
-                if m.get("id") in SENT_SIGNALS: continue
-                # (Логика анализа и отправки сигналов)
-                # ...
+                match_id = m.get("id")
+                if match_id in SENT_SIGNALS:
+                    continue
+                
+                tournament_name = m.get("tournament", {}).get("name", "").lower()
+                if not any(t in tournament_name for t in ALLOWED_TOURNAMENTS):
+                    continue
+                
+                status_type = m.get("status", {}).get("type")
+                if status_type != "inprogress":
+                    continue
+                
+                home_team = m.get("homeTeam", {}).get("name")
+                away_team = m.get("awayTeam", {}).get("name")
+                
+                home_score = m.get("homeScore", {}).get("display", 0)
+                away_score = m.get("awayScore", {}).get("display", 0)
+                
+                # --- ЛОГИКА АНАЛИЗА И ОТБОР СИГНАЛОВ ---
+                home_stats = get_player_stats(match_id, "home")
+                away_stats = get_player_stats(match_id, "away")
+                
+                # Стратегия 1: Камбэк фаворита (проигрывает 0:1 или 0:2 по сетам)
+                if home_stats["win_rate"] >= MIN_WIN_RATE_FAV and home_stats["streak"] >= MIN_STREAK_FAV and home_score < away_score:
+                    msg = (
+                        f"🔥 <b>СТРАТЕГИЯ: Камбэк фаворита</b>\n"
+                        f"🏆 {m.get('tournament', {}).get('name')}\n\n"
+                        f"👤 <b>{home_team}</b> (Винрейт: {home_stats['win_rate']}% | Стрик: {home_stats['streak']})\n"
+                        f"Форма: {home_stats['symbols']}\n\n"
+                        f"👤 <b>{away_team}</b> (Винрейт: {away_stats['win_rate']}% | Стрик: {away_stats['streak']})\n"
+                        f"Форма: {away_stats['symbols']}\n\n"
+                        f"📊 <b>Текущий счет по сетам:</b> {home_score} : {away_score}"
+                    )
+                    send_telegram_message(msg)
+                    SENT_SIGNALS.add(match_id)
+                    
+                elif away_stats["win_rate"] >= MIN_WIN_RATE_FAV and away_stats["streak"] >= MIN_STREAK_FAV and away_score < home_score:
+                    msg = (
+                        f"🔥 <b>СТРАТЕГИЯ: Камбэк фаворита</b>\n"
+                        f"🏆 {m.get('tournament', {}).get('name')}\n\n"
+                        f"👤 <b>{away_team}</b> (Винрейт: {away_stats['win_rate']}% | Стрик: {away_stats['streak']})\n"
+                        f"Форма: {away_stats['symbols']}\n\n"
+                        f"👤 <b>{home_team}</b> (Винрейт: {home_stats['win_rate']}% | Стрик: {home_stats['streak']})\n"
+                        f"Форма: {home_stats['symbols']}\n\n"
+                        f"📊 <b>Текущий счет по сетам:</b> {home_score} : {away_score}"
+                    )
+                    send_telegram_message(msg)
+                    SENT_SIGNALS.add(match_id)
+                
+                # Стратегия 2: Равная игра ТОП игроков
+                elif home_stats["win_rate"] >= MIN_WIN_RATE_EQUAL and away_stats["win_rate"] >= MIN_WIN_RATE_EQUAL:
+                    if home_stats["streak"] >= MIN_STREAK_EQUAL and away_stats["streak"] >= MIN_STREAK_EQUAL:
+                        msg = (
+                            f"⚔️ <b>СТРАТЕГИЯ: Равная игра ТОП</b>\n"
+                            f"🏆 {m.get('tournament', {}).get('name')}\n\n"
+                            f"👤 {home_team} (Винрейт: {home_stats['win_rate']}% | Стрик: {home_stats['streak']})\n"
+                            f"Форма: {home_stats['symbols']}\n"
+                            f"👤 {away_team} (Винрейт: {away_stats['win_rate']}% | Стрик: {away_stats['streak']})\n"
+                            f"Форма: {away_stats['symbols']}\n\n"
+                            f"📊 Счет по сетам: {home_score} : {away_score}"
+                        )
+                        send_telegram_message(msg)
+                        SENT_SIGNALS.add(match_id)
+                        
+        else:
+            print("[Мониторинг]: Нет активных лайв-матчей или ошибка запроса.")
         time.sleep(45)
 
+# --- WEB SERVER ДЛЯ RENDER ---
 app = Flask(__name__)
+
 @app.before_request
 def start_monitoring():
     if not any(t.name == "SofascoreMonitorThread" for t in threading.enumerate()):
         threading.Thread(target=monitor_table_tennis, name="SofascoreMonitorThread", daemon=True).start()
 
 @app.route('/')
-def home(): return "Бот активен!"
+def home():
+    return "Бот активен и запущен на Render!"
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+                        
