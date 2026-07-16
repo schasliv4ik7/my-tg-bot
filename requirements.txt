@@ -1,3 +1,4 @@
+
 flask
 gunicorn
-httpx[socks]
+requests
