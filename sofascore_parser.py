@@ -7,29 +7,26 @@ from flask import Flask
 app = Flask(__name__)
 
 def monitor():
-    print("--- [СИСТЕМА] Мониторинг запущен (с усиленной маскировкой) ---", flush=True)
-    # Расширенный набор заголовков для обхода 403 ошибки
-    headers = {
+    print("--- [СИСТЕМА] Мониторинг запущен ---", flush=True)
+    # Создаем сессию, чтобы сохранять куки, как настоящий браузер
+    session = requests.Session()
+    session.headers.update({
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
         "Accept": "application/json, text/plain, */*",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Referer": "https://www.sofascore.com/",
-        "Origin": "https://www.sofascore.com",
-        "Connection": "keep-alive"
-    }
+        "Referer": "https://www.sofascore.com/"
+    })
     
     while True:
         try:
-            response = requests.get(
-                "https://api.sofascore.com/api/v1/sport/table-tennis/events/live", 
-                headers=headers, 
-                timeout=15
-            )
+            # Сначала «заходим» на главную, чтобы получить куки
+            session.get("https://www.sofascore.com/", timeout=10)
+            # Теперь делаем запрос к API
+            response = session.get("https://api.sofascore.com/api/v1/sport/table-tennis/events/live", timeout=10)
+            
             print(f"--- Статус: {response.status_code} ---", flush=True)
             
             if response.status_code == 200:
                 print("--- [УСПЕХ] Данные успешно получены! ---", flush=True)
-                # Здесь можно добавить логику парсинга JSON
             else:
                 print(f"--- [ПРЕДУПРЕЖДЕНИЕ] Код ответа: {response.status_code} ---", flush=True)
                 
