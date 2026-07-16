@@ -1,6 +1,8 @@
 import os
 import time
 import random
+import re
+import json
 import threading
 import requests
 from flask import Flask
@@ -20,7 +22,7 @@ PROXY_URL = "socks5://TvSYGxHL:H19ycY2V@158.46.145.135:64311"
 ALLOWED_TOURNAMENTS = [
     "liga pro", "лига про", 
     "setka cup", "сетка кап", "кубок сетка", 
-    "tt cup", "тт кап", "тт кубок"
+    "tt cup", "тт кап", "тт кубок", "tt elite"
 ]
 
 # --- НАСТРОЙКИ ФИЛЬТРОВ ---
@@ -30,16 +32,16 @@ MIN_WIN_RATE_EQUAL = 55.0
 MIN_STREAK_EQUAL = 2
 
 USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0"
+    "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (Linux; Android 13; SM-S901B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36"
 ]
 
 # --- НАСТРОЙКА СЕССИИ С ИЗОЛЯЦИЕЙ ТРАФИКА ---
 session = requests.Session()
 if PROXY_URL:
     session.proxies = {"http": PROXY_URL, "https": PROXY_URL}
-    session.trust_env = False  # Исключаем утечку трафика мимо прокси на Render
+    session.trust_env = False
 
 SENT_SIGNALS = set()
 
@@ -54,74 +56,111 @@ def send_telegram_message(text):
 def make_request(url):
     headers = {
         "User-Agent": random.choice(USER_AGENTS),
-        "Accept": "*/*",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
         "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
-        "Referer": "https://www.livesport.cz/stolnitennis/",
-        "X-Fsign": "SW9D1eZo"
+        "Referer": "https://m.aiscore.com/",
+        "Cache-Control": "max-age=0"
     }
     try:
         response = session.get(url, headers=headers, timeout=15, verify=False)
         if response.status_code == 200:
             return response.text
-        print(f"[Livesport] Ошибка доступа. Код: {response.status_code}")
+        print(f"[AiScore] Ошибка доступа. Код: {response.status_code}")
         return None
     except Exception as e:
-        print(f"[Livesport] Ошибка запроса: {e}")
+        print(f"[AiScore] Ошибка запроса: {e}")
         return None
 
-def parse_flashscore_live(feed_text):
-    if not feed_text:
+def parse_aiscore_live(html_text):
+    if not html_text:
         return []
         
-    # --- ВРЕМЕННЫЙ ДИАГНОСТИЧЕСКИЙ ВЫВОД ---
-    # Выводим начало фида в лог, чтобы увидеть разделители и структуру
-    print(f"[DEBUG RAW FEED] Начало полученных данных (первые 500 символов):\n{feed_text[:500]}\n--- КОНЕЦ ДЕБАГА ---")
-    
     matches = []
-    sections = feed_text.split("~")
-    current_tournament = ""
-    seen_tournaments = set()  # Для отладки в логах
     
-    for section in sections:
-        if section.startswith("ZA"):  # Имя турнира
-            current_tournament = section.split("÷")[1].lower() if "÷" in section else ""
-            if current_tournament:
-                seen_tournaments.add(current_tournament)
-            continue
+    # Пытаемся найти JSON-данные состояния страницы, которые AiScore рендерит в HTML
+    json_data = None
+    
+    # Способ 1: Скрипт __NEXT_DATA__ (самый частый для Next.js / мобильных версий)
+    next_data_match = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', html_text, re.DOTALL)
+    if next_data_match:
+        try:
+            json_data = json.loads(next_data_match.group(1))
+            print("[AiScore] Успешно извлечен JSON из __NEXT_DATA__")
+        except Exception as e:
+            print(f"[AiScore] Ошибка разбора __NEXT_DATA__ JSON: {e}")
             
-        if not any(t in current_tournament for t in ALLOWED_TOURNAMENTS):
-            continue
+    # Способ 2: Альтернативный поиск INITIAL_STATE
+    if not json_data:
+        initial_state_match = re.search(r'window\.__INITIAL_STATE__\s*=\s*({.*?});', html_text, re.DOTALL)
+        if initial_state_match:
+            try:
+                json_data = json.loads(initial_state_match.group(1))
+                print("[AiScore] Успешно извлечен JSON из __INITIAL_STATE__")
+            except Exception as e:
+                print(f"[AiScore] Ошибка разбора __INITIAL_STATE__ JSON: {e}")
+
+    # Если нашли JSON, вытаскиваем из него матчи
+    if json_data:
+        try:
+            # Ищем ветку с матчами в структуре данных (может отличаться в зависимости от версии страницы)
+            props = json_data.get("props", {})
+            page_props = props.get("pageProps", {})
+            initial_state = page_props.get("initialState", page_props)
             
-        if section.startswith("AA"):  # Данные матча
-            parts = section.split("¬")
-            match_data = {}
-            for part in parts:
-                if "÷" in part:
-                    key, val = part.split("÷", 1)
-                    match_data[key] = val
+            # Пытаемся найти список матчей в разных возможных ключах структуры AiScore
+            match_list = (
+                initial_state.get("matches", []) or 
+                initial_state.get("matchList", []) or 
+                initial_state.get("liveMatches", []) or
+                json_data.get("matches", [])
+            )
             
-            match_id = match_data.get("AA")
-            status = match_data.get("AD")  # 3 означает "в игре"
+            seen_tournaments = set()
             
-            if status == "3" and match_id:
-                home_player = match_data.get("AE", "Игрок 1")
-                away_player = match_data.get("AF", "Игрок 2")
-                home_score = int(match_data.get("AG", 0))
-                away_score = int(match_data.get("AH", 0))
+            for m in match_list:
+                tournament_name = m.get("tournamentName", m.get("compName", "Unknown")).lower()
+                seen_tournaments.add(tournament_name)
                 
-                matches.append({
-                    "id": match_id,
-                    "tournament": current_tournament,
-                    "home": home_player,
-                    "away": away_player,
-                    "home_score": home_score,
-                    "away_score": away_score
-                })
+                # Фильтр по турнирам
+                if not any(t in tournament_name for t in ALLOWED_TOURNAMENTS):
+                    continue
                 
-    # Выводим в лог все найденные в лайве турниры для контроля
-    if seen_tournaments:
-        print(f"[Debug] Сейчас в лайве идут турниры: {list(seen_tournaments)}")
-        
+                # Статус матча: 2 или "live" означает, что матч идет прямо сейчас
+                status = str(m.get("status", m.get("statusId", "")))
+                
+                # Обычно на AiScore статус 2 - это LIVE, статус 1 - не начался, 3 - завершен
+                if status == "2" or m.get("isLive", False):
+                    match_id = str(m.get("id", m.get("matchId", random.randint(100000, 999999))))
+                    home_player = m.get("homeName", m.get("homeTeamName", "Игрок 1"))
+                    away_player = m.get("awayName", m.get("awayTeamName", "Игрок 2"))
+                    
+                    # Получаем текущий счет по сетам
+                    home_score = int(m.get("homeScore", m.get("homeSetScore", 0)))
+                    away_score = int(m.get("awayScore", m.get("awaySetScore", 0)))
+                    
+                    matches.append({
+                        "id": match_id,
+                        "tournament": tournament_name,
+                        "home": home_player,
+                        "away": away_player,
+                        "home_score": home_score,
+                        "away_score": away_score
+                    })
+            
+            if seen_tournaments:
+                print(f"[Debug] Сейчас в лайве на AiScore идут турниры: {list(seen_tournaments)}")
+                
+        except Exception as e:
+            print(f"[AiScore] Ошибка прохода по структуре JSON: {e}")
+
+    # Резервный вариант: если JSON не нашелся, парсим базовые данные регулярками из HTML
+    if not matches:
+        print("[AiScore] Сработал резервный регулярный парсер HTML...")
+        # Ищем блоки матчей через регулярные выражения
+        raw_matches = re.findall(r'class="match-item".*?data-id="(\d+)"', html_text, re.DOTALL)
+        if raw_matches:
+            print(f"[AiScore] Резервный парсер нашел сырых матчей в HTML: {len(raw_matches)}")
+            
     return matches
 
 def get_player_history_stats(player_name):
@@ -141,19 +180,20 @@ def get_player_history_stats(player_name):
 
 def monitor_table_tennis():
     send_telegram_message(
-        f"🤖 <b>Бот Livesport запущен с интервалом 40 сек!</b>\n\n"
+        f"🤖 <b>Бот успешно переключен на AiScore!</b>\n\n"
         f"1️⃣ <b>Упущенный 1-й сет:</b> фаворит уступил партию (кэф вырос)\n"
         f"2️⃣ <b>Камбэк фаворита:</b> винрейт {MIN_WIN_RATE_FAV}%, стрик {MIN_STREAK_FAV}\n"
         f"3️⃣ <b>Равная игра ТОП:</b> винрейт {MIN_WIN_RATE_EQUAL}%, стрик {MIN_STREAK_EQUAL}"
     )
     
     while True:
-        feed = make_request("https://d.livesport.cz/x/feed/l_3_2_ru-ru_1")
+        # Запрашиваем мобильную лайв-страницу настольного тенниса на AiScore
+        html = make_request("https://m.aiscore.com/ru/table-tennis")
         
-        if feed:
-            print("[Livesport] Данные успешно получены. Начинаем парсинг...")
-            live_matches = parse_flashscore_live(feed)
-            print(f"[Livesport] Найдено матчей для анализа: {len(live_matches)}")
+        if html:
+            print("[AiScore] Страница успешно загружена. Начинаем парсинг...")
+            live_matches = parse_aiscore_live(html)
+            print(f"[AiScore] Найдено матчей для анализа: {len(live_matches)}")
             
             for m in live_matches:
                 match_id = m["id"]
@@ -171,7 +211,7 @@ def monitor_table_tennis():
                 # --- СТРАТЕГИЯ 1: УПУЩЕННЫЙ ПЕРВЫЙ СЕТ ---
                 if home_stats["win_rate"] >= MIN_WIN_RATE_FAV and home_stats["streak"] >= MIN_STREAK_FAV and home_score == 0 and away_score == 1:
                     msg = (
-                        f"🎯 <b>СТРАТЕГИЯ: Упущенный 1-й сет (Livesport)</b>\n"
+                        f"🎯 <b>СТРАТЕГИЯ: Упущенный 1-й сет (AiScore)</b>\n"
                         f"🏆 {m['tournament'].upper()}\n\n"
                         f"🟢 <b>Рекомендуемая ставка: П1 (Победа {home_team})</b>\n"
                         f"📝 <b>Почему:</b> Наш фаворит имеет мощный винрейт {home_stats['win_rate']}% и стрик {home_stats['streak']} побед подряд. "
@@ -186,7 +226,7 @@ def monitor_table_tennis():
 
                 elif away_stats["win_rate"] >= MIN_WIN_RATE_FAV and away_stats["streak"] >= MIN_STREAK_FAV and home_score == 1 and away_score == 0:
                     msg = (
-                        f"🎯 <b>СТРАТЕГИЯ: Упущенный 1-й сет (Livesport)</b>\n"
+                        f"🎯 <b>СТРАТЕГИЯ: Упущенный 1-й сет (AiScore)</b>\n"
                         f"🏆 {m['tournament'].upper()}\n\n"
                         f"🟢 <b>Рекомендуемая ставка: П2 (Победа {away_team})</b>\n"
                         f"📝 <b>Почему:</b> Наш фаворит имеет мощный винрейт {away_stats['win_rate']}% и стрик {away_stats['streak']} побед подряд. "
@@ -202,11 +242,11 @@ def monitor_table_tennis():
                 # --- СТРАТЕГИЯ 2: КАМБЭК ФАВОРИТА (Глубокое отставание) ---
                 if home_stats["win_rate"] >= MIN_WIN_RATE_FAV and home_stats["streak"] >= MIN_STREAK_FAV and home_score < away_score:
                     msg = (
-                        f"🔥 <b>СТРАТЕГИЯ: Камбэк фаворита (Livesport)</b>\n"
+                        f"🔥 <b>СТРАТЕГИЯ: Камбэк фаворита (AiScore)</b>\n"
                         f"🏆 {m['tournament'].upper()}\n\n"
                         f"🟢 <b>Рекомендуемая ставка: Победа {home_team} (П1)</b>\n"
                         f"📝 <b>Почему:</b> Явный фаворит (винрейт {home_stats['win_rate']}%) горит по ходу встречи. "
-                        f"Класс игрока и его победный стрик ({home_stats['streak']}) указывают на высокую вероятность камбэка. Ловим пиковый кэф!\n\n"
+                        f"Класс игрока и его победный стрик ({home_stats['streak']}) указывают на высокую вероятность камбэка.\n\n"
                         f"👤 {home_team} | Форма: {home_stats['symbols']}\n"
                         f"👤 {away_team} | Форма: {away_stats['symbols']}\n\n"
                         f"📊 <b>Текущий счет по сетам:</b> {home_score} : {away_score}"
@@ -216,11 +256,11 @@ def monitor_table_tennis():
                     
                 elif away_stats["win_rate"] >= MIN_WIN_RATE_FAV and away_stats["streak"] >= MIN_STREAK_FAV and away_score < home_score:
                     msg = (
-                        f"🔥 <b>СТРАТЕГИЯ: Камбэк фаворита (Livesport)</b>\n"
+                        f"🔥 <b>СТРАТЕГИЯ: Камбэк фаворита (AiScore)</b>\n"
                         f"🏆 {m['tournament'].upper()}\n\n"
                         f"🟢 <b>Рекомендуемая ставка: Победа {away_team} (П2)</b>\n"
                         f"📝 <b>Почему:</b> Явный фаворит (винрейт {away_stats['win_rate']}%) горит по ходу встречи. "
-                        f"Класс игрока и его победный стрик ({away_stats['streak']}) указывают на высокую вероятность камбэка. Ловим пиковый кэф!\n\n"
+                        f"Класс игрока и его победный стрик ({away_stats['streak']}) указывают на высокую вероятность камбэка.\n\n"
                         f"👤 {away_team} | Форма: {away_stats['symbols']}\n"
                         f"👤 {home_team} | Форма: {home_stats['symbols']}\n\n"
                         f"📊 <b>Текущий счет по сетам:</b> {home_score} : {away_score}"
@@ -233,7 +273,7 @@ def monitor_table_tennis():
                     if home_stats["streak"] >= MIN_STREAK_EQUAL and away_stats["streak"] >= MIN_STREAK_EQUAL:
                         recommended = f"ТБ по очкам / победа отстающего в сете"
                         msg = (
-                            f"⚔️ <b>СТРАТЕГИЯ: Равная игра ТОП (Livesport)</b>\n"
+                            f"⚔️ <b>СТРАТЕГИЯ: Равная игра ТОП (AiScore)</b>\n"
                             f"🏆 {m['tournament'].upper()}\n\n"
                             f"🟢 <b>Рекомендуемая ставка: {recommended}</b>\n"
                             f"📝 <b>Почему:</b> Оба игрока находятся на подъеме (винрейты > {MIN_WIN_RATE_EQUAL}% и серии побед). "
@@ -245,21 +285,21 @@ def monitor_table_tennis():
                         send_telegram_message(msg)
                         SENT_SIGNALS.add(match_id)
         else:
-            print("[Livesport] Ошибка: Не удалось получить фид данных через прокси.")
+            print("[AiScore] Ошибка: Не удалось получить данные с сайта.")
             
-        time.sleep(40)
+        time.sleep(40)  # Твой интервал 40 секунд
 
 # --- WEB SERVER ДЛЯ RENDER ---
 app = Flask(__name__)
 
 @app.before_request
 def start_monitoring():
-    if not any(t.name == "LivesportMonitorThread" for t in threading.enumerate()):
-        threading.Thread(target=monitor_table_tennis, name="LivesportMonitorThread", daemon=True).start()
+    if not any(t.name == "AiScoreMonitorThread" for t in threading.enumerate()):
+        threading.Thread(target=monitor_table_tennis, name="AiScoreMonitorThread", daemon=True).start()
 
 @app.route('/')
 def home():
-    return "Бот активен на Livesport.cz с прокси!"
+    return "Бот активен на AiScore с прокси!"
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
