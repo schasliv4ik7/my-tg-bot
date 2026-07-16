@@ -5,7 +5,6 @@ import threading
 import httpx
 from flask import Flask, Response
 
-# Инициализируем app на самом верхнем уровне
 app = Flask(__name__)
 
 PROXIES = [
@@ -24,16 +23,26 @@ PROXIES = [
 def monitor():
     print("--- [СИСТЕМА] Поток мониторинга запущен ---", flush=True)
     while True:
-        proxy = random.choice(PROXIES)
+        proxy_url = random.choice(PROXIES)
+        print(f"--- [СЕТЬ] Попытка через: {proxy_url.split('@')[1]} ---", flush=True)
+        
         try:
-            with httpx.Client(proxies={"http://": proxy, "https://": proxy}, timeout=10.0, verify=False) as client:
+            # Правильный способ передачи прокси в httpx
+            transport = httpx.ProxyTransport(url=proxy_url)
+            with httpx.Client(transport=transport, timeout=10.0, verify=False) as client:
                 resp = client.get("https://api.sofascore.com/api/v1/sport/table-tennis/events/live", timeout=10.0)
-            print(f"--- [СЕТЬ] Прокси {proxy.split('@')[1]} | Статус: {resp.status_code} ---", flush=True)
+            
+            print(f"--- [СЕТЬ] Статус: {resp.status_code} ---", flush=True)
+            if resp.status_code == 200:
+                print("--- [УСПЕХ] Данные получены! ---", flush=True)
+            else:
+                print(f"--- [ОШИБКА] Статус {resp.status_code} ---", flush=True)
         except Exception as e:
-            print(f"--- [ОШИБКА] {e} ---", flush=True)
+            print(f"--- [ОШИБКА] {str(e)} ---", flush=True)
+            
         time.sleep(60)
 
-# Запускаем мониторинг при импорте модуля (это стандарт для Render/Gunicorn)
+# Запуск потока
 threading.Thread(target=monitor, daemon=True).start()
 
 @app.route('/')
