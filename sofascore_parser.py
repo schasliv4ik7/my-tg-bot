@@ -16,8 +16,12 @@ YOUR_CHAT_ID = "5777477925"
 # --- ТВОЙ ПРИВАТНЫЙ ПРОКСИ ---
 PROXY_URL = "socks5://TvSYGxHL:H19ycY2V@158.46.145.135:64311"
 
-# --- БЕЛЫЙ СПИСОК ТУРНИРОВ ---
-ALLOWED_TOURNAMENTS = ["liga pro", "setka cup", "tt cup"]
+# --- БЕЛЫЙ СПИСОК ТУРНИРОВ (Русские и английские варианты) ---
+ALLOWED_TOURNAMENTS = [
+    "liga pro", "лига про", 
+    "setka cup", "сетка кап", "кубок сетка", 
+    "tt cup", "тт кап", "тт кубок"
+]
 
 # --- НАСТРОЙКИ ФИЛЬТРОВ ---
 MIN_WIN_RATE_FAV = 70.0
@@ -72,10 +76,13 @@ def parse_flashscore_live(feed_text):
     matches = []
     sections = feed_text.split("~")
     current_tournament = ""
+    seen_tournaments = set()  # Для отладки в логах
     
     for section in sections:
         if section.startswith("ZA"):  # Имя турнира
             current_tournament = section.split("÷")[1].lower() if "÷" in section else ""
+            if current_tournament:
+                seen_tournaments.add(current_tournament)
             continue
             
         if not any(t in current_tournament for t in ALLOWED_TOURNAMENTS):
@@ -106,10 +113,15 @@ def parse_flashscore_live(feed_text):
                     "home_score": home_score,
                     "away_score": away_score
                 })
+                
+    # Выводим в лог все найденные в лайве турниры для контроля
+    if seen_tournaments:
+        print(f"[Debug] Сейчас в лайве идут турниры: {list(seen_tournaments)}")
+        
     return matches
 
 def get_player_history_stats(player_name):
-    # Симуляция сбора статистики (последние 5 игр) для Livesport
+    # Симуляция сбора статистики (последние 5 игр)
     wins = [random.choice([True, False]) for _ in range(5)]
     win_rate = (wins.count(True) / len(wins)) * 100
     streak = 0
@@ -125,7 +137,7 @@ def get_player_history_stats(player_name):
 
 def monitor_table_tennis():
     send_telegram_message(
-        f"🤖 <b>Бот Livesport запущен с тремя стратегиями!</b>\n\n"
+        f"🤖 <b>Бот Livesport запущен с интервалом 40 сек!</b>\n\n"
         f"1️⃣ <b>Упущенный 1-й сет:</b> фаворит уступил партию (кэф вырос)\n"
         f"2️⃣ <b>Камбэк фаворита:</b> винрейт {MIN_WIN_RATE_FAV}%, стрик {MIN_STREAK_FAV}\n"
         f"3️⃣ <b>Равная игра ТОП:</b> винрейт {MIN_WIN_RATE_EQUAL}%, стрик {MIN_STREAK_EQUAL}"
@@ -153,7 +165,6 @@ def monitor_table_tennis():
                 away_stats = get_player_history_stats(away_team)
                 
                 # --- СТРАТЕГИЯ 1: УПУЩЕННЫЙ ПЕРВЫЙ СЕТ ---
-                # Фаворит Home проиграл первый сет (0:1 по сетам)
                 if home_stats["win_rate"] >= MIN_WIN_RATE_FAV and home_stats["streak"] >= MIN_STREAK_FAV and home_score == 0 and away_score == 1:
                     msg = (
                         f"🎯 <b>СТРАТЕГИЯ: Упущенный 1-й сет (Livesport)</b>\n"
@@ -169,7 +180,6 @@ def monitor_table_tennis():
                     SENT_SIGNALS.add(match_id)
                     continue
 
-                # Фаворит Away проиграл первый сет (1:0 по сетам)
                 elif away_stats["win_rate"] >= MIN_WIN_RATE_FAV and away_stats["streak"] >= MIN_STREAK_FAV and home_score == 1 and away_score == 0:
                     msg = (
                         f"🎯 <b>СТРАТЕГИЯ: Упущенный 1-й сет (Livesport)</b>\n"
@@ -217,7 +227,6 @@ def monitor_table_tennis():
                 # --- СТРАТЕГИЯ 3: РАВНАЯ ИГРА ТОП ИГРОКОВ ---
                 elif home_stats["win_rate"] >= MIN_WIN_RATE_EQUAL and away_stats["win_rate"] >= MIN_WIN_RATE_EQUAL:
                     if home_stats["streak"] >= MIN_STREAK_EQUAL and away_stats["streak"] >= MIN_STREAK_EQUAL:
-                        # ТМ / ТБ или плюсовая фора на отстающего в плотной борьбе
                         recommended = f"ТБ по очкам / победа отстающего в сете"
                         msg = (
                             f"⚔️ <b>СТРАТЕГИЯ: Равная игра ТОП (Livesport)</b>\n"
@@ -234,7 +243,7 @@ def monitor_table_tennis():
         else:
             print("[Livesport] Ошибка: Не удалось получить фид данных через прокси.")
             
-        time.sleep(50)
+        time.sleep(40)  # Твои 40 секунд интервала
 
 # --- WEB SERVER ДЛЯ RENDER ---
 app = Flask(__name__)
