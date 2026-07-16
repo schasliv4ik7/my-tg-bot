@@ -125,13 +125,13 @@ def get_player_history_stats(player_name):
 
 def monitor_table_tennis():
     send_telegram_message(
-        f"🤖 <b>Бот переключен на Livesport/Flashscore!</b>\n\n"
-        f"1️⃣ <b>Камбэк фаворита:</b> винрейт {MIN_WIN_RATE_FAV}%, стрик {MIN_STREAK_FAV}\n"
-        f"2️⃣ <b>Равная игра ТОП:</b> винрейт {MIN_WIN_RATE_EQUAL}%, стрик {MIN_STREAK_EQUAL}"
+        f"🤖 <b>Бот Livesport запущен с тремя стратегиями!</b>\n\n"
+        f"1️⃣ <b>Упущенный 1-й сет:</b> фаворит уступил партию (кэф вырос)\n"
+        f"2️⃣ <b>Камбэк фаворита:</b> винрейт {MIN_WIN_RATE_FAV}%, стрик {MIN_STREAK_FAV}\n"
+        f"3️⃣ <b>Равная игра ТОП:</b> винрейт {MIN_WIN_RATE_EQUAL}%, стрик {MIN_STREAK_EQUAL}"
     )
     
     while True:
-        # Прямой запрос к живому фиду настольного тенниса на Livesport.cz
         feed = make_request("https://d.livesport.cz/x/feed/l_3_2_ru-ru_1")
         
         if feed:
@@ -152,15 +152,49 @@ def monitor_table_tennis():
                 home_stats = get_player_history_stats(home_team)
                 away_stats = get_player_history_stats(away_team)
                 
-                # Стратегия 1: Камбэк фаворита (проигрывает по сетам)
+                # --- СТРАТЕГИЯ 1: УПУЩЕННЫЙ ПЕРВЫЙ СЕТ ---
+                # Фаворит Home проиграл первый сет (0:1 по сетам)
+                if home_stats["win_rate"] >= MIN_WIN_RATE_FAV and home_stats["streak"] >= MIN_STREAK_FAV and home_score == 0 and away_score == 1:
+                    msg = (
+                        f"🎯 <b>СТРАТЕГИЯ: Упущенный 1-й сет (Livesport)</b>\n"
+                        f"🏆 {m['tournament'].upper()}\n\n"
+                        f"🟢 <b>Рекомендуемая ставка: П1 (Победа {home_team})</b>\n"
+                        f"📝 <b>Почему:</b> Наш фаворит имеет мощный винрейт {home_stats['win_rate']}% и стрик {home_stats['streak']} побед подряд. "
+                        f"Он случайно отдал первый сет и сейчас идет разогретым. Коэффициент на его победу в лайве сейчас завышен и крайне выгоден!\n\n"
+                        f"👤 {home_team} | {home_stats['win_rate']}% | Форма: {home_stats['symbols']}\n"
+                        f"👤 {away_team} | {away_stats['win_rate']}% | Форма: {away_stats['symbols']}\n\n"
+                        f"📊 <b>Текущий счет:</b> {home_score} : {away_score}"
+                    )
+                    send_telegram_message(msg)
+                    SENT_SIGNALS.add(match_id)
+                    continue
+
+                # Фаворит Away проиграл первый сет (1:0 по сетам)
+                elif away_stats["win_rate"] >= MIN_WIN_RATE_FAV and away_stats["streak"] >= MIN_STREAK_FAV and home_score == 1 and away_score == 0:
+                    msg = (
+                        f"🎯 <b>СТРАТЕГИЯ: Упущенный 1-й сет (Livesport)</b>\n"
+                        f"🏆 {m['tournament'].upper()}\n\n"
+                        f"🟢 <b>Рекомендуемая ставка: П2 (Победа {away_team})</b>\n"
+                        f"📝 <b>Почему:</b> Наш фаворит имеет мощный винрейт {away_stats['win_rate']}% и стрик {away_stats['streak']} побед подряд. "
+                        f"Он случайно отдал первый сет и сейчас идет разогретым. Коэффициент на его победу в лайве сейчас завышен и крайне выгоден!\n\n"
+                        f"👤 {away_team} | {away_stats['win_rate']}% | Форма: {away_stats['symbols']}\n"
+                        f"👤 {home_team} | {home_stats['win_rate']}% | Форма: {home_stats['symbols']}\n\n"
+                        f"📊 <b>Текущий счет:</b> {home_score} : {away_score}"
+                    )
+                    send_telegram_message(msg)
+                    SENT_SIGNALS.add(match_id)
+                    continue
+
+                # --- СТРАТЕГИЯ 2: КАМБЭК ФАВОРИТА (Глубокое отставание) ---
                 if home_stats["win_rate"] >= MIN_WIN_RATE_FAV and home_stats["streak"] >= MIN_STREAK_FAV and home_score < away_score:
                     msg = (
                         f"🔥 <b>СТРАТЕГИЯ: Камбэк фаворита (Livesport)</b>\n"
                         f"🏆 {m['tournament'].upper()}\n\n"
-                        f"👤 <b>{home_team}</b> (Винрейт: {home_stats['win_rate']}% | Стрик: {home_stats['streak']})\n"
-                        f"Форма: {home_stats['symbols']}\n\n"
-                        f"👤 <b>{away_team}</b> (Винрейт: {away_stats['win_rate']}% | Стрик: {away_stats['streak']})\n"
-                        f"Форма: {away_stats['symbols']}\n\n"
+                        f"🟢 <b>Рекомендуемая ставка: Победа {home_team} (П1)</b>\n"
+                        f"📝 <b>Почему:</b> Явный фаворит (винрейт {home_stats['win_rate']}%) горит по ходу встречи. "
+                        f"Класс игрока и его победный стрик ({home_stats['streak']}) указывают на высокую вероятность камбэка. Ловим пиковый кэф!\n\n"
+                        f"👤 {home_team} | Форма: {home_stats['symbols']}\n"
+                        f"👤 {away_team} | Форма: {away_stats['symbols']}\n\n"
                         f"📊 <b>Текущий счет по сетам:</b> {home_score} : {away_score}"
                     )
                     send_telegram_message(msg)
@@ -170,25 +204,29 @@ def monitor_table_tennis():
                     msg = (
                         f"🔥 <b>СТРАТЕГИЯ: Камбэк фаворита (Livesport)</b>\n"
                         f"🏆 {m['tournament'].upper()}\n\n"
-                        f"👤 <b>{away_team}</b> (Винрейт: {away_stats['win_rate']}% | Стрик: {away_stats['streak']})\n"
-                        f"Форма: {away_stats['symbols']}\n\n"
-                        f"👤 <b>{home_team}</b> (Винрейт: {home_stats['win_rate']}% | Стрик: {home_stats['streak']})\n"
-                        f"Форма: {home_stats['symbols']}\n\n"
+                        f"🟢 <b>Рекомендуемая ставка: Победа {away_team} (П2)</b>\n"
+                        f"📝 <b>Почему:</b> Явный фаворит (винрейт {away_stats['win_rate']}%) горит по ходу встречи. "
+                        f"Класс игрока и его победный стрик ({away_stats['streak']}) указывают на высокую вероятность камбэка. Ловим пиковый кэф!\n\n"
+                        f"👤 {away_team} | Форма: {away_stats['symbols']}\n"
+                        f"👤 {home_team} | Форма: {home_stats['symbols']}\n\n"
                         f"📊 <b>Текущий счет по сетам:</b> {home_score} : {away_score}"
                     )
                     send_telegram_message(msg)
                     SENT_SIGNALS.add(match_id)
                 
-                # Стратегия 2: Равная игра ТОП игроков
+                # --- СТРАТЕГИЯ 3: РАВНАЯ ИГРА ТОП ИГРОКОВ ---
                 elif home_stats["win_rate"] >= MIN_WIN_RATE_EQUAL and away_stats["win_rate"] >= MIN_WIN_RATE_EQUAL:
                     if home_stats["streak"] >= MIN_STREAK_EQUAL and away_stats["streak"] >= MIN_STREAK_EQUAL:
+                        # ТМ / ТБ или плюсовая фора на отстающего в плотной борьбе
+                        recommended = f"ТБ по очкам / победа отстающего в сете"
                         msg = (
                             f"⚔️ <b>СТРАТЕГИЯ: Равная игра ТОП (Livesport)</b>\n"
                             f"🏆 {m['tournament'].upper()}\n\n"
+                            f"🟢 <b>Рекомендуемая ставка: {recommended}</b>\n"
+                            f"📝 <b>Почему:</b> Оба игрока находятся на подъеме (винрейты > {MIN_WIN_RATE_EQUAL}% и серии побед). "
+                            f"Встречаются два равных лидера, ожидается затяжной плотный матч с высокой вероятностью экстра-поинтов.\n\n"
                             f"👤 {home_team} (Винрейт: {home_stats['win_rate']}% | Стрик: {home_stats['streak']})\n"
-                            f"Форма: {home_stats['symbols']}\n"
-                            f"👤 {away_team} (Винрейт: {away_stats['win_rate']}% | Стрик: {away_stats['streak']})\n"
-                            f"Форма: {away_stats['symbols']}\n\n"
+                            f"👤 {away_team} (Винрейт: {away_stats['win_rate']}% | Стрик: {away_stats['streak']})\n\n"
                             f"📊 Счет по сетам: {home_score} : {away_score}"
                         )
                         send_telegram_message(msg)
