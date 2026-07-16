@@ -5,7 +5,7 @@ import threading
 import requests
 from flask import Flask
 
-# Отключаем предупреждения об отсутствии SSL-верификации
+# Отключаем предупреждения SSL
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
@@ -13,16 +13,10 @@ requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 BOT_TOKEN = "8225494453:AAG55D-7g0jxrQAyRsWK1qyJkK3mf0WGMgM"
 YOUR_CHAT_ID = "5777477925"
 
-# --- ТВОЙ ПРИВАТНЫЙ ПРОКСИ ---
+# --- ТВОЙ ПОЛЬСКИЙ ПРОКСИ ---
 PROXY_URL = "socks5://TvSYGxHL:H19ycY2V@158.46.145.135:64311"
 
-MOBILE_USER_AGENTS = [
-    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1",
-    "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36",
-    "Mozilla/5.0 (Linux; Android 13; SAMSUNG SM-S911B) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/25.0 Chrome/121.0.0.0 Mobile Safari/537.36"
-]
-
-# Инициализируем сессию с прокси
+# Инициализируем сессию через прокси
 session = requests.Session()
 if PROXY_URL:
     session.proxies = {"http": PROXY_URL, "https": PROXY_URL}
@@ -40,88 +34,111 @@ def send_telegram_message(text):
     }
     try:
         requests.post(url, json=payload, timeout=10, verify=False)
-        print("[Telegram] Тестовое сообщение успешно отправлено!", flush=True)
+        print("[Telegram] Тестовое сообщение отправлено!", flush=True)
     except Exception as e:
-        print(f"[Telegram] Ошибка отправки сообщения: {e}", flush=True)
+        print(f"[Telegram] Ошибка отправки: {e}", flush=True)
 
 
-def make_request(url):
+def get_sts_live_matches():
+    # Официальный лайв-API STS
+    url = "https://www.sts.pl/api/sports/v1/live"
     headers = {
-        "User-Agent": random.choice(MOBILE_USER_AGENTS),
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
         "Accept": "application/json, text/plain, */*",
-        "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
-        "Referer": "https://www.sofascore.com/",
-        "Origin": "https://www.sofascore.com",
-        "Cache-Control": "no-cache"
+        "Accept-Language": "pl-PL,pl;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Referer": "https://www.sts.pl/",
+        "Origin": "https://www.sts.pl"
     }
     try:
-        print(f"[Сеть] Запрос к {url} через прокси...", flush=True)
+        print(f"[STS Сеть] Запрос к live-API через польский прокси...", flush=True)
         response = session.get(url, headers=headers, timeout=15, verify=False)
-        print(f"[Сеть] Ответ сервера: {response.status_code}", flush=True)
+        print(f"[STS Сеть] Статус ответа: {response.status_code}", flush=True)
+        
         if response.status_code == 200:
             return response.json()
         return None
     except Exception as e:
-        print(f"[Сеть] Ошибка запроса через прокси: {e}", flush=True)
+        print(f"[STS Сеть] Ошибка при подключении к STS: {e}", flush=True)
         return None
 
 
-def get_live_table_tennis_matches():
-    url = "https://api.sofascore.com/api/v1/sport/table-tennis/events/live"
-    data = make_request(url)
-    return data.get("events", []) if data else []
-
-
-def monitor_table_tennis():
-    print("=== [ПОТОК] ТЕСТОВЫЙ ЗАПУСК ЧЕРЕЗ ПРОКСИ БЕЗ ФИЛЬТРОВ ===", flush=True)
-    send_telegram_message("🧪 <b>Тестовый режим через ПРОКСИ запущен!</b>\nИщу вообще любые лайв-матчи без фильтрации.")
+def monitor_sts():
+    print("=== [ПОТОК] СТАРТ ТЕСТИРОВАНИЯ STS LIVE ===", flush=True)
+    send_telegram_message("🇵🇱 <b>Тест STS запущен!</b>\nПроверяю доступ к линии польского букмекера.")
     
     while True:
         try:
-            print("[Мониторинг] Начинаем круг сканирования...", flush=True)
-            matches = get_live_table_tennis_matches()
+            print("[STS Мониторинг] Сканируем лайв...", flush=True)
+            data = get_sts_live_matches()
             
-            if matches:
-                print(f"[Мониторинг] УСПЕХ! Найдено {len(matches)} матчей в лайве SofaScore.", flush=True)
+            if data and "sports" in data:
+                found_any_table_tennis = False
                 current_live_ids = set()
                 
-                for match in matches:
-                    event_id = match.get("id")
-                    current_live_ids.add(event_id)
-                    
-                    if event_id in SENT_SIGNALS:
-                        continue
-                    
-                    tournament_name = match.get("tournament", {}).get("name", "Unknown")
-                    home_player = match.get("homeTeam", {}).get("name", "Player 1")
-                    away_player = match.get("awayTeam", {}).get("name", "Player 2")
-                    home_score = match.get("homeScore", {}).get("display", 0)
-                    away_score = match.get("awayScore", {}).get("display", 0)
-                    
-                    msg_text = (
-                        f"🧪 <b>ТЕСТОВЫЙ МАТЧ НАЙДЕН!</b>\n\n"
-                        f"🏆 Лига: {tournament_name}\n"
-                        f"🏓 Игра: <b>{home_player}</b> vs <b>{away_player}</b>\n"
-                        f"📊 Текущий счет: {home_score} : {away_score}\n"
-                        f"🆔 ID: <code>{event_id}</code>"
-                    )
-                    
-                    print(f"[Мониторинг] Отправляю тестовый матч ID {event_id} в Телеграм...", flush=True)
-                    send_telegram_message(msg_text)
-                    SENT_SIGNALS.add(event_id)
-                    time.sleep(1)
+                for sport in data["sports"]:
+                    # Ищем категорию настольного тенниса по-польски или по-английски
+                    sport_name = sport.get("name", "").lower()
+                    if "tenis stołowy" in sport_name or "table tennis" in sport_name:
+                        found_any_table_tennis = True
+                        
+                        # Парсим регионы и лиги
+                        for region in sport.get("regions", []):
+                            for league in region.get("leagues", []):
+                                league_name = league.get("name", "Unknown League")
+                                
+                                # Парсим матчи
+                                for match in league.get("matches", []):
+                                    match_id = match.get("id")
+                                    current_live_ids.add(match_id)
+                                    
+                                    if match_id in SENT_SIGNALS:
+                                        continue
+                                    
+                                    home_team = match.get("homeTeamName", "Home Player")
+                                    away_team = match.get("awayTeamName", "Away Player")
+                                    
+                                    # Парсим текущий счет (если доступен в API)
+                                    score = match.get("score", {})
+                                    home_score = score.get("home", 0)
+                                    away_score = score.get("away", 0)
+                                    
+                                    # Извлекаем основные кэфы на победу (П1 / П2)
+                                    odds_p1, odds_p2 = "—", "—"
+                                    for market in match.get("markets", []):
+                                        if market.get("name") in ["Winner", "Mecz"]:
+                                            rates = market.get("rates", [])
+                                            if len(rates) >= 2:
+                                                odds_p1 = rates[0].get("rateValue", "—")
+                                                odds_p2 = rates[1].get("rateValue", "—")
+                                    
+                                    msg_text = (
+                                        f"🇵🇱 <b>STS: НАЙДЕН LIVE МАТЧ!</b>\n\n"
+                                        f"🏆 Турнир: {league_name}\n"
+                                        f"🏓 Пара: <b>{home_team}</b> vs <b>{away_team}</b>\n"
+                                        f"📊 Счет по сетам: {home_score} : {away_score}\n"
+                                        f"📈 Кэфы в лайве: П1 [<code>{odds_p1}</code>] | П2 [<code>{odds_p2}</code>]\n"
+                                        f"🆔 ID матча: <code>{match_id}</code>"
+                                    )
+                                    
+                                    print(f"[STS] Найдена игра {home_team} - {away_team}. Отправляю...", flush=True)
+                                    send_telegram_message(msg_text)
+                                    SENT_SIGNALS.add(match_id)
+                                    time.sleep(1)
                 
-                # Чистим старые матчи
+                # Чистим завершенные матчи из памяти
                 expired_matches = SENT_SIGNALS - current_live_ids
                 for expired_id in expired_matches:
                     SENT_SIGNALS.remove(expired_id)
+                
+                if not found_any_table_tennis:
+                    print("[STS Мониторинг] Настольный теннис сейчас отсутствует в лайве STS.", flush=True)
             else:
-                print("[Мониторинг] На SofaScore сейчас 0 активных лайв-игр.", flush=True)
+                print("[STS Мониторинг] Не удалось прочитать структуру спорта из API.", flush=True)
                 
         except Exception as e:
-            print(f"[Мониторинг] Ошибка в цикле: {e}", flush=True)
+            print(f"[STS Мониторинг] Ошибка в цикле: {e}", flush=True)
             
-        print("[Мониторинг] Круг завершен. Ждем 30 секунд...", flush=True)
+        print("[STS Мониторинг] Круг завершен. Ждем 30 секунд...", flush=True)
         time.sleep(30)
 
 
@@ -130,17 +147,13 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Тестовый бот через прокси активен!"
+    return "STS Тестовый бот запущен!"
 
-
-# --- ЗАПУСК ПОТОКА ПРИ ИМПОРТЕ GUNICORN ---
-# Выносим запуск из блока __main__, чтобы поток стартовал на Render автоматически!
-print("[Система] Инициализация фонового потока для Gunicorn...", flush=True)
-monitor_thread = threading.Thread(target=monitor_table_tennis, daemon=True)
+# Принудительный старт потока для Gunicorn
+print("[Система] Инициализация фонового потока STS для Gunicorn...", flush=True)
+monitor_thread = threading.Thread(target=monitor_sts, daemon=True)
 monitor_thread.start()
 
-
 if __name__ == "__main__":
-    # Локальный запуск
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
