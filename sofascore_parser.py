@@ -29,11 +29,11 @@ ALLOWED_TOURNAMENTS = [
 MIN_WIN_RATE_FAV = 70.0
 MIN_STREAK_FAV = 3
 
-# Реалистичные User-Agent для обхода Cloudflare на основной странице
-USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36 Edge/123.0.0.0",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+# Мобильные User-Agent'ы для запроса к мобильной версии сайта
+MOBILE_USER_AGENTS = [
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36",
+    "Mozilla/5.0 (Linux; Android 13; SAMSUNG SM-S911B) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/25.0 Chrome/121.0.0.0 Mobile Safari/537.36"
 ]
 
 session = requests.Session()
@@ -54,104 +54,121 @@ def send_telegram_message(text):
 
 def make_request(url):
     headers = {
-        "User-Agent": random.choice(USER_AGENTS),
+        "User-Agent": random.choice(MOBILE_USER_AGENTS),
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
         "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
-        "Referer": "https://www.aiscore.com/",
-        "Cache-Control": "max-age=0",
-        "Upgrade-Insecure-Requests": "1"
+        "Referer": "https://m.aiscore.com/",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache"
     }
     try:
-        print(f"[AiScore PC] Отправка запроса на {url}...")
+        print(f"[AiScore Mobile] Запрос к {url}...")
         response = session.get(url, headers=headers, timeout=15, verify=False)
-        print(f"[AiScore PC] Статус ответа сервера: {response.status_code}")
+        print(f"[AiScore Mobile] Статус ответа сервера: {response.status_code}")
         if response.status_code == 200:
             return response.text
         return None
     except Exception as e:
-        print(f"[AiScore PC] Исключение при выполнении запроса: {e}")
+        print(f"[AiScore Mobile] Ошибка сети: {e}")
         return None
 
-def parse_aiscore_live(html_text):
+def parse_aiscore_mobile_live(html_text):
     if not html_text:
         return []
         
     matches = []
     
-    # Рекурсивный поиск списков матчей в любом JSON-объекте
-    def find_matches_in_json(data):
-        if isinstance(data, dict):
-            # Проверяем, похож ли этот словарь на объект матча
-            if "homeName" in data or "homeTeamName" in data or "homeTeam" in data:
-                # Проверим, относится ли он к настольному теннису
-                tour_name = str(data.get("tournamentName", data.get("compName", ""))).lower()
-                if any(t in tour_name for t in ALLOWED_TOURNAMENTS):
-                    return [data]
-            
-            results = []
-            for k, v in data.items():
-                res = find_matches_in_json(v)
-                if res:
-                    results.extend(res)
-            return results
-            
-        elif isinstance(data, list):
-            results = []
-            for item in data:
-                res = find_matches_in_json(item)
-                if res:
-                    results.extend(res)
-            return results
-        return []
-
-    # Находим абсолютно все блоки скриптов на странице
-    scripts = re.findall(r'<script[^>]*>(.*?)</script>', html_text, re.DOTALL)
-    print(f"[AiScore PC] Найдено скриптов на странице для анализа: {len(scripts)}")
+    # 1. Попытка быстро найти __NEXT_DATA__ (стандарт для мобильной версии Next.js)
+    next_data_match = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', html_text, re.DOTALL)
     
-    for idx, script_content in enumerate(scripts):
-        # Ищем потенциальные JSON структуры внутри скрипта
-        json_candidates = re.findall(r'({.*?})', script_content, re.DOTALL)
-        for candidate in json_candidates:
-            # Ограничиваем длину кандидата, чтобы не парсить слишком мелкий мусор
-            if len(candidate) < 150:
-                continue
-            try:
-                parsed_json = json.loads(candidate)
-                found_raw = find_matches_in_json(parsed_json)
-                if found_raw:
-                    print(f"[AiScore PC] В скрипте #{idx} обнаружена рабочая структура данных с матчами!")
-                    for m in found_raw:
-                        tournament_name = str(m.get("tournamentName", m.get("compName", m.get("tournament", "Unknown")))).lower()
-                        status = str(m.get("status", m.get("statusId", "")))
-                        
-                        # Собираем данные матча (в лайве он или нет)
-                        if status == "2" or m.get("isLive", False) or m.get("live", False):
-                            home_team = m.get("homeName", m.get("homeTeamName", m.get("homeTeam", {}).get("name", "Игрок 1")))
-                            away_team = m.get("awayName", m.get("awayTeamName", m.get("awayTeam", {}).get("name", "Игрок 2")))
-                            
-                            # Безопасное извлечение счета
-                            home_score = int(m.get("homeScore", m.get("homeSetScore", m.get("homeScoreTotal", 0))))
-                            away_score = int(m.get("awayScore", m.get("awaySetScore", m.get("awayScoreTotal", 0))))
-                            
-                            match_info = {
-                                "id": str(m.get("id", m.get("matchId", random.randint(100000, 999999)))),
-                                "tournament": tournament_name,
-                                "home": home_team,
-                                "away": away_team,
-                                "home_score": home_score,
-                                "away_score": away_score
-                            }
-                            # Исключаем дубликаты по ID
-                            if not any(parsed_m["id"] == match_info["id"] for parsed_m in matches):
-                                matches.append(match_info)
-                                print(f"[AiScore PC] Добавлен матч: {home_team} vs {away_team} ({tournament_name}) — {home_score}:{away_score}")
-            except:
-                continue
+    json_blocks = []
+    if next_data_match:
+        print("[AiScore Mobile] Найдена структура __NEXT_DATA__")
+        json_blocks.append(next_data_match.group(1))
+    else:
+        # Если тег переименовали, собираем все script-блоки с JSON
+        print("[AiScore Mobile] Тег __NEXT_DATA__ не найден, сканируем все скрипты...")
+        scripts = re.findall(r'<script[^>]*>(.*?)</script>', html_text, re.DOTALL)
+        for s in scripts:
+            if "props" in s or "queries" in s or "initialState" in s:
+                json_blocks.append(s)
+
+    # Рекурсивный обход JSON для поиска матчей
+    def extract_matches(node):
+        found = []
+        if isinstance(node, dict):
+            # Ищем признаки объекта матча
+            is_match_obj = False
+            # Проверяем ключевые поля (в зависимости от структуры API/Next)
+            home_name = node.get("homeName") or node.get("homeTeamName") or node.get("home_name")
+            away_name = node.get("awayName") or node.get("awayTeamName") or node.get("away_name")
+            
+            if home_name and away_name:
+                tour_name = str(node.get("tournamentName", node.get("compName", node.get("tournament_name", "")))).lower()
+                if any(t in tour_name for t in ALLOWED_TOURNAMENTS):
+                    is_match_obj = True
+            
+            if is_match_obj:
+                found.append(node)
+            else:
+                for k, v in node.items():
+                    found.extend(extract_matches(v))
+        elif isinstance(node, list):
+            for item in node:
+                found.extend(extract_matches(item))
+        return found
+
+    for block in json_blocks:
+        try:
+            # Чистим блок, если там есть присвоение переменной типа window.DATA = {...}
+            if "=" in block and not block.strip().startswith("{"):
+                block_clean = block[block.find("{"):block.rfind("}")+1]
+            else:
+                block_clean = block.strip()
+                
+            data = json.loads(block_clean)
+            raw_matches = extract_matches(data)
+            
+            for m in raw_matches:
+                # Извлекаем ID матча
+                match_id = str(m.get("id") or m.get("matchId") or m.get("match_id") or random.randint(100000, 999999))
+                
+                # Проверяем статус (в лайве ли матч)
+                # status: 2 - Live в системе AiScore
+                status = str(m.get("status") or m.get("statusId") or m.get("status_id") or "")
+                is_live = m.get("isLive") or m.get("live") or (status == "2")
+                
+                if not is_live:
+                    continue
+                
+                tournament_name = str(m.get("tournamentName", m.get("compName", m.get("tournament_name", "Unknown")))).lower()
+                home_team = m.get("homeName") or m.get("homeTeamName") or m.get("home_name") or "Игрок 1"
+                away_team = m.get("awayName") or m.get("awayTeamName") or m.get("away_name") or "Игрок 2"
+                
+                # Извлечение счета по сетам (в лайве счет часто вложен в score/setScore)
+                score_obj = m.get("score") or m.get("setScore") or m
+                home_score = int(score_obj.get("homeScore", score_obj.get("homeSetScore", score_obj.get("home_score", 0))))
+                away_score = int(score_obj.get("awayScore", score_obj.get("awaySetScore", score_obj.get("away_score", 0))))
+                
+                match_info = {
+                    "id": match_id,
+                    "tournament": tournament_name,
+                    "home": home_team,
+                    "away": away_team,
+                    "home_score": home_score,
+                    "away_score": away_score
+                }
+                
+                if not any(parsed_m["id"] == match_info["id"] for parsed_m in matches):
+                    matches.append(match_info)
+                    print(f"[AiScore Mobile] Обнаружен лайв: {home_team} vs {away_team} ({tournament_name}) — Счет: {home_score}:{away_score}")
+        except Exception as e:
+            continue
 
     return matches
 
 def get_player_history_stats(player_name):
-    # Генерация мок-статистики для тестирования логики
+    # Симуляция получения статистики игрока для работы триггеров
     wins = [random.choice([True, False]) for _ in range(5)]
     win_rate = (wins.count(True) / len(wins)) * 100
     streak = 0
@@ -167,14 +184,15 @@ def get_player_history_stats(player_name):
 
 def monitor_table_tennis():
     print("[Мониторинг] Поток успешно стартовал!")
-    send_telegram_message("🤖 <b>Бот успешно запущен на супер-парсере HTML AiScore!</b>")
+    send_telegram_message("🤖 <b>Бот успешно запущен на мобильном парсере AiScore!</b>")
     
     while True:
         try:
-            html = make_request("https://www.aiscore.com/ru/table-tennis")
+            # Запрашиваем мобильную версию страницы настольного тенниса
+            html = make_request("https://m.aiscore.com/table-tennis")
             if html:
-                live_matches = parse_aiscore_live(html)
-                print(f"[Мониторинг] Отобрано {len(live_matches)} матчей для анализа стратегий.")
+                live_matches = parse_aiscore_mobile_live(html)
+                print(f"[Мониторинг] Отобрано {len(live_matches)} лайв-матчей для анализа стратегий.")
                 
                 for m in live_matches:
                     match_id = m["id"]
@@ -192,7 +210,7 @@ def monitor_table_tennis():
                     # --- СТРАТЕГИЯ: УПУЩЕННЫЙ ПЕРВЫЙ СЕТ ---
                     if home_stats["win_rate"] >= MIN_WIN_RATE_FAV and home_stats["streak"] >= MIN_STREAK_FAV and home_score == 0 and away_score == 1:
                         msg = (
-                            f"🎯 <b>СТРАТЕГИЯ: Упущенный 1-й сет (AiScore PC)</b>\n"
+                            f"🎯 <b>СТРАТЕГИЯ: Упущенный 1-й сет (AiScore Mobile)</b>\n"
                             f"🏆 {m['tournament'].upper()}\n\n"
                             f"🟢 <b>Рекомендуемая ставка: П1 (Победа {home_team})</b>\n\n"
                             f"👤 {home_team} | {home_stats['win_rate']}% | Форма: {home_stats['symbols']}\n"
@@ -204,7 +222,7 @@ def monitor_table_tennis():
 
                     elif away_stats["win_rate"] >= MIN_WIN_RATE_FAV and away_stats["streak"] >= MIN_STREAK_FAV and home_score == 1 and away_score == 0:
                         msg = (
-                            f"🎯 <b>СТРАТЕГИЯ: Упущенный 1-й сет (AiScore PC)</b>\n"
+                            f"🎯 <b>СТРАТЕГИЯ: Упущенный 1-й сет (AiScore Mobile)</b>\n"
                             f"🏆 {m['tournament'].upper()}\n\n"
                             f"🟢 <b>Рекомендуемая ставка: П2 (Победа {away_team})</b>\n\n"
                             f"👤 {away_team} | {away_stats['win_rate']}% | Форма: {away_stats['symbols']}\n"
@@ -214,7 +232,7 @@ def monitor_table_tennis():
                         send_telegram_message(msg)
                         SENT_SIGNALS.add(match_id)
             else:
-                print("[Мониторинг] Не удалось получить HTML страницы.")
+                print("[Мониторинг] Не удалось получить мобильный HTML.")
         except Exception as e:
             print(f"[Мониторинг] Ошибка в главном цикле: {e}")
             
@@ -225,9 +243,9 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Бот активен и парсит AiScore с глубоким анализом скриптов!"
+    return "Бот активен и парсит мобильную версию AiScore!"
 
-monitor_thread = threading.Thread(target=monitor_table_tennis, name="AiScorePCMonitorThread", daemon=True)
+monitor_thread = threading.Thread(target=monitor_table_tennis, name="AiScoreMobileMonitorThread", daemon=True)
 monitor_thread.start()
 
 if __name__ == "__main__":
