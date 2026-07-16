@@ -2,12 +2,8 @@ import os
 import time
 import random
 import threading
-import requests
+import httpx
 from flask import Flask
-
-# Отключаем предупреждения SSL
-from requests.packages.urllib3.exceptions import InsecureRequestWarning
-requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
 # --- НАСТРОЙКИ TELEGRAM ---
 BOT_TOKEN = "8225494453:AAG55D-7g0jxrQAyRsWK1qyJkK3mf0WGMgM"
@@ -16,22 +12,24 @@ YOUR_CHAT_ID = "5777477925"
 # --- ТВОЙ ПРОКСИ ---
 PROXY_URL = "socks5://TvSYGxHL:H19ycY2V@158.46.145.135:64311"
 
-# Список популярных мобильных агентов
+# Список популярных мобильных User-Agent
 MOBILE_USER_AGENTS = [
     "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1",
     "Mozilla/5.0 (Linux; Android 13; SM-S901B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36"
 ]
 
-# Инициализируем сессию через прокси
-session = requests.Session()
-if PROXY_URL:
-    session.proxies = {"http": PROXY_URL, "https": PROXY_URL}
-    session.trust_env = False
-
 SENT_SIGNALS = set()
-
-# Список отслеживаемых лиг настольного тенниса (можно расширять)
 TARGET_LEAGUES = ["setka cup", "liga pro", "tt cup", "win cup", "challenger series"]
+
+# Настраиваем клиент HTTPX с поддержкой прокси
+# HTTPX автоматически и корректно оборачивает SSL поверх SOCKS5
+limits = httpx.Limits(max_keepalive_connections=5, max_connections=10)
+client = httpx.Client(
+    proxies=PROXY_URL,
+    verify=False,  # игнорируем SSL-ошибки, чтобы избежать блокировок
+    limits=limits,
+    timeout=15.0
+)
 
 
 def send_telegram_message(text):
@@ -42,14 +40,15 @@ def send_telegram_message(text):
         "parse_mode": "HTML"
     }
     try:
-        requests.post(url, json=payload, timeout=10, verify=False)
+        # Для отправки в ТГ можно использовать прямой запрос без прокси (или через него)
+        with httpx.Client(verify=False) as tg_client:
+            tg_client.post(url, json=payload, timeout=10.0)
         print("[Telegram] Сообщение отправлено!", flush=True)
     except Exception as e:
         print(f"[Telegram] Ошибка отправки: {e}", flush=True)
 
 
 def get_aiscore_live():
-    # Мобильный API-эндпоинт лайв матчей AiScore для настольного тенниса (ID спорта 5)
     url = "https://isb.aiscore.com/api/v1/sport/table-tennis/events/live"
     headers = {
         "User-Agent": random.choice(MOBILE_USER_AGENTS),
@@ -59,27 +58,27 @@ def get_aiscore_live():
         "Referer": "https://m.aiscore.com/"
     }
     try:
-        print("[AiScore Сеть] Запрос к API лайва...", flush=True)
-        response = session.get(url, headers=headers, timeout=15, verify=False)
+        print("[AiScore Сеть] Делаем запрос через HTTPX + SOCKS5...", flush=True)
+        response = client.get(url, headers=headers)
         print(f"[AiScore Сеть] Статус ответа: {response.status_code}", flush=True)
+        
         if response.status_code == 200:
             return response.json()
         return None
     except Exception as e:
-        print(f"[AiScore Сеть] Ошибка запроса: {e}", flush=True)
+        print(f"[AiScore Сеть] Системная ошибка подключения: {e}", flush=True)
         return None
 
 
 def monitor_aiscore():
-    print("=== [ПОТОК] СТАРТ ТЕСТИРОВАНИЯ AISCORE LIVE ===", flush=True)
-    send_telegram_message("📱 <b>Тест AiScore запущен!</b>\nИщу лайв-матчи по настольному теннису.")
+    print("=== [ПОТОК] СТАРТ МОНИТОРИНГА AISCORE LIVE ===", flush=True)
+    send_telegram_message("📱 <b>Тест AiScore + HTTPX запущен!</b>\nПроверяю стабильность прокси-соединения.")
     
     while True:
         try:
             print("[AiScore Мониторинг] Сканируем лайв...", flush=True)
             data = get_aiscore_live()
             
-            # В зависимости от структуры ответа API AiScore
             events = []
             if data:
                 if isinstance(data, dict):
@@ -101,7 +100,7 @@ def monitor_aiscore():
                     tournament = event.get("tournament", {}) or event.get("comp", {})
                     league_name = tournament.get("name", "Unknown League")
                     
-                    # Проверяем, подходит ли лига под наши фильтры
+                    # Фильтр по лигам
                     is_target = any(target in league_name.lower() for target in TARGET_LEAGUES)
                     if not is_target:
                         continue
@@ -128,12 +127,12 @@ def monitor_aiscore():
                     SENT_SIGNALS.add(event_id)
                     time.sleep(1)
                     
-                # Очистка завершенных матчей
+                # Чистим завершенные матчи
                 expired_matches = SENT_SIGNALS - current_live_ids
                 for expired_id in expired_matches:
                     SENT_SIGNALS.remove(expired_id)
             else:
-                print("[AiScore Мониторинг] Лайв-матчи не найдены или пустой ответ от API.", flush=True)
+                print("[AiScore Мониторинг] Лайв-матчи не найдены или пустой ответ.", flush=True)
                 
         except Exception as e:
             print(f"[AiScore Мониторинг] Ошибка в цикле: {e}", flush=True)
@@ -147,10 +146,9 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "AiScore Бот активен!"
+    return "HTTPX Бот активен!"
 
-# Принудительный старт фонового потока для Gunicorn
-print("[Система] Инициализация фонового потока AiScore для Gunicorn...", flush=True)
+print("[Система] Инициализация фонового потока HTTPX...", flush=True)
 monitor_thread = threading.Thread(target=monitor_aiscore, daemon=True)
 monitor_thread.start()
 
