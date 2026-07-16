@@ -73,6 +73,10 @@ def parse_flashscore_live(feed_text):
     if not feed_text:
         return []
         
+    # --- ВРЕМЕННЫЙ ДИАГНОСТИЧЕСКИЙ ВЫВОД ---
+    # Выводим начало фида в лог, чтобы увидеть разделители и структуру
+    print(f"[DEBUG RAW FEED] Начало полученных данных (первые 500 символов):\n{feed_text[:500]}\n--- КОНЕЦ ДЕБАГА ---")
+    
     matches = []
     sections = feed_text.split("~")
     current_tournament = ""
@@ -243,7 +247,7 @@ def monitor_table_tennis():
         else:
             print("[Livesport] Ошибка: Не удалось получить фид данных через прокси.")
             
-        time.sleep(40)  # Твои 40 секунд интервала
+        time.sleep(40)
 
 # --- WEB SERVER ДЛЯ RENDER ---
 app = Flask(__name__)
