@@ -13,9 +13,6 @@ requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 BOT_TOKEN = "8225494453:AAG55D-7g0jxrQAyRsWK1qyJkK3mf0WGMgM"
 YOUR_CHAT_ID = "5777477925"
 
-# --- ТВОЙ ПРИВАТНЫЙ ПРОКСИ ---
-PROXY_URL = "socks5://TvSYGxHL:H19ycY2V@158.46.145.135:64311"
-
 # --- БЕЛЫЙ СПИСОК ТУРНИРОВ ---
 ALLOWED_TOURNAMENTS = ["liga pro", "setka cup", "tt cup"]
 
@@ -31,11 +28,9 @@ USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/119.0"
 ]
 
-# --- НАСТРОЙКА СЕССИИ С ИЗОЛЯЦИЕЙ ТРАФИКА ---
+# --- НАСТРОЙКА СЕССИИ (БЕЗ ПРОКСИ) ---
 session = requests.Session()
-if PROXY_URL:
-    session.proxies = {"http": PROXY_URL, "https": PROXY_URL}
-    session.trust_env = False  # Полностью исключает утечку трафика мимо прокси на Render
+session.trust_env = False  # Отключаем переменные окружения, чтобы запросы шли напрямую
 
 SENT_SIGNALS = set()
 
@@ -100,7 +95,7 @@ def get_player_stats(match_id, side):
 
 def monitor_table_tennis():
     send_telegram_message(
-        f"🤖 <b>Фильтр запущен!</b>\n\n"
+        f"🤖 <b>Фильтр запущен (БЕЗ ПРОКСИ)!</b>\n\n"
         f"1️⃣ <b>Камбэк фаворита:</b> винрейт {MIN_WIN_RATE_FAV}%, стрик {MIN_STREAK_FAV}\n"
         f"2️⃣ <b>Равная игра ТОП:</b> винрейт {MIN_WIN_RATE_EQUAL}%, стрик {MIN_STREAK_EQUAL}"
     )
@@ -186,8 +181,7 @@ def start_monitoring():
 
 @app.route('/')
 def home():
-    return "Бот активен и запущен на Render!"
+    return "Бот активен и запущен на Render (без прокси)!"
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
-                        
