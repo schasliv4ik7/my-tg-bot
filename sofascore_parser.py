@@ -6,12 +6,11 @@ import httpx
 from flask import Flask, Response
 
 app = Flask(__name__)
-app.config['SERVER_NAME'] = None
 
 BOT_TOKEN = "8225494453:AAG55D-7g0jxrQAyRsWK1qyJkK3mf0WGMgM"
 YOUR_CHAT_ID = "5777477925"
 
-# --- ТВОЙ СПИСОК ПРОКСИ ---
+# Твой полный список прокси
 PROXIES = [
     "http://aeeufstt:mmzjzap1e8nc@31.59.20.176:6754",
     "http://aeeufstt:mmzjzap1e8nc@31.56.127.193:7684",
@@ -25,52 +24,47 @@ PROXIES = [
     "http://aeeufstt:mmzjzap1e8nc@191.96.254.138:6185"
 ]
 
-def get_random_proxy():
-    return random.choice(PROXIES)
-
-def send_telegram_message(text):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    payload = {"chat_id": YOUR_CHAT_ID, "text": text, "parse_mode": "HTML"}
+def send_tg(text):
     try:
-        httpx.post(url, json=payload, timeout=10.0)
-    except Exception as e:
-        print(f"[Telegram] Ошибка: {e}", flush=True)
+        httpx.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", 
+                   json={"chat_id": YOUR_CHAT_ID, "text": text, "parse_mode": "HTML"}, timeout=5)
+    except: pass
 
-def get_sofascore_live():
+def get_live_data():
     url = "https://api.sofascore.com/api/v1/sport/table-tennis/events/live"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
-        "Referer": "https://www.sofascore.com/"
-    }
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"}
     
-    # Пытаемся сделать запрос с рандомным прокси
-    proxy_url = get_random_proxy()
-    proxies = {"http://": proxy_url, "https://": proxy_url}
-    
-    try:
-        print(f"[Сеть] Запрос через прокси: {proxy_url.split('@')[1]}", flush=True)
-        response = httpx.get(url, headers=headers, proxies=proxies, timeout=15.0, verify=False)
-        print(f"[Сеть] Статус: {response.status_code}", flush=True)
-        return response.json() if response.status_code == 200 else None
-    except Exception as e:
-        print(f"[Сеть] Ошибка: {e}", flush=True)
-        return None
+    # Пытаемся пройти через каждый прокси из списка по очереди, если нужно
+    random.shuffle(PROXIES) 
+    for proxy in PROXIES:
+        try:
+            proxies = {"http://": proxy, "https://": proxy}
+            print(f"[Сеть] Пробую прокси: {proxy.split('@')[1]}", flush=True)
+            resp = httpx.get(url, headers=headers, proxies=proxies, timeout=10, verify=False)
+            
+            if resp.status_code == 200:
+                return resp.json()
+            print(f"[Сеть] Код {resp.status_code} на {proxy.split('@')[1]}", flush=True)
+        except Exception as e:
+            print(f"[Сеть] Ошибка {proxy.split('@')[1]}: {e}", flush=True)
+    return None
 
-def monitor_sofascore():
-    time.sleep(10)
+def monitor():
+    time.sleep(5)
+    print("=== [СИСТЕМА] МОНИТОРИНГ ЗАПУЩЕН ===", flush=True)
     while True:
-        data = get_sofascore_live()
+        data = get_live_data()
         if data:
-            print("[Мониторинг] Данные получены успешно!", flush=True)
-            # Тут будет твоя логика парсинга
+            print("[Мониторинг] Данные получены, проверяю матчи...", flush=True)
+            # Тут твоя логика уведомлений
         else:
-            print("[Мониторинг] Ошибка или нет лайв-матчей, пробуем через 30 сек...", flush=True)
-        time.sleep(30)
+            print("[Мониторинг] Все прокси вернули ошибку или пусто. Жду 60 сек.", flush=True)
+        time.sleep(60)
 
 @app.route('/')
 def home():
-    return "Bot is running with proxy rotation"
+    return "Bot is alive"
 
 if __name__ == "__main__":
-    threading.Thread(target=monitor_sofascore, daemon=True).start()
+    threading.Thread(target=monitor, daemon=True).start()
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
