@@ -1,31 +1,25 @@
-import os
-import time
-import threading
-import httpx
-from flask import Flask
-
-app = Flask(__name__)
-
 def monitor():
-    print("--- [СИСТЕМА] Мониторинг запущен (ПРЯМОЙ ДОСТУП) ---", flush=True)
+    print("--- [СИСТЕМА] Поток мониторинга запущен (ВЕРСИЯ БЕЗ КЛИЕНТА) ---", flush=True)
     while True:
+        proxy_url = random.choice(PROXIES)
+        print(f"--- [СЕТЬ] Попытка через: {proxy_url.split('@')[1]} ---", flush=True)
+        
         try:
-            # Запрос без прокси
-            resp = httpx.get("https://api.sofascore.com/api/v1/sport/table-tennis/events/live", timeout=15.0)
+            # Используем прямой вызов httpx.get, это гарантированно не вызовет ошибку Client.__init__
+            resp = httpx.get(
+                "https://api.sofascore.com/api/v1/sport/table-tennis/events/live",
+                proxies={"http://": proxy_url, "https://": proxy_url},
+                timeout=10.0,
+                verify=False
+            )
+            
             print(f"--- [СЕТЬ] Статус ответа: {resp.status_code} ---", flush=True)
             if resp.status_code == 200:
                 print("--- [УСПЕХ] Данные получены! ---", flush=True)
             else:
-                print(f"--- [ПРЕДУПРЕЖДЕНИЕ] Код ответа: {resp.status_code} ---", flush=True)
+                print(f"--- [ОШИБКА] Сервер вернул код: {resp.status_code} ---", flush=True)
         except Exception as e:
-            print(f"--- [ОШИБКА] {str(e)} ---", flush=True)
+            # Выводим тип ошибки, чтобы понять, если проблема останется
+            print(f"--- [КРИТИЧЕСКАЯ ОШИБКА] {type(e).__name__}: {str(e)} ---", flush=True)
+            
         time.sleep(60)
-
-threading.Thread(target=monitor, daemon=True).start()
-
-@app.route('/')
-def home():
-    return "Bot is running"
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
