@@ -1,43 +1,26 @@
 import os
 import time
-import random
 import threading
 import httpx
-from flask import Flask, Response
+from flask import Flask
 
 app = Flask(__name__)
 
-PROXIES = [
-    "http://aeeufstt:mmzjzap1e8nc@31.59.20.176:6754",
-    "http://aeeufstt:mmzjzap1e8nc@31.56.127.193:7684",
-    "http://aeeufstt:mmzjzap1e8nc@45.38.107.97:6014",
-    "http://aeeufstt:mmzjzap1e8nc@198.105.121.200:6462",
-    "http://aeeufstt:mmzjzap1e8nc@64.137.96.74:6641",
-    "http://aeeufstt:mmzjzap1e8nc@198.23.243.226:6361",
-    "http://aeeufstt:mmzjzap1e8nc@38.154.185.97:6370",
-    "http://aeeufstt:mmzjzap1e8nc@84.247.60.125:6095",
-    "http://aeeufstt:mmzjzap1e8nc@142.111.67.146:5611",
-    "http://aeeufstt:mmzjzap1e8nc@191.96.254.138:6185"
-]
-
 def monitor():
-    print("--- [СИСТЕМА] Поток мониторинга запущен ---", flush=True)
+    print("--- [СИСТЕМА] Мониторинг запущен (ПРЯМОЙ ДОСТУП) ---", flush=True)
     while True:
-        proxy_url = random.choice(PROXIES)
-        print(f"--- [СЕТЬ] Попытка через: {proxy_url.split('@')[1]} ---", flush=True)
-        
         try:
-            # Классический способ передачи прокси, совместимый со всеми версиями httpx
-            with httpx.Client(proxies=proxy_url, timeout=10.0, verify=False) as client:
-                resp = client.get("https://api.sofascore.com/api/v1/sport/table-tennis/events/live", timeout=10.0)
-            
-            print(f"--- [СЕТЬ] Статус: {resp.status_code} ---", flush=True)
+            # Запрос без прокси
+            resp = httpx.get("https://api.sofascore.com/api/v1/sport/table-tennis/events/live", timeout=15.0)
+            print(f"--- [СЕТЬ] Статус ответа: {resp.status_code} ---", flush=True)
+            if resp.status_code == 200:
+                print("--- [УСПЕХ] Данные получены! ---", flush=True)
+            else:
+                print(f"--- [ПРЕДУПРЕЖДЕНИЕ] Код ответа: {resp.status_code} ---", flush=True)
         except Exception as e:
             print(f"--- [ОШИБКА] {str(e)} ---", flush=True)
-            
         time.sleep(60)
 
-# Запуск потока
 threading.Thread(target=monitor, daemon=True).start()
 
 @app.route('/')
