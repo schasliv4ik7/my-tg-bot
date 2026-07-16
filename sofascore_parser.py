@@ -7,9 +7,6 @@ from flask import Flask, Response
 
 app = Flask(__name__)
 
-BOT_TOKEN = "8225494453:AAG55D-7g0jxrQAyRsWK1qyJkK3mf0WGMgM"
-YOUR_CHAT_ID = "5777477925"
-
 PROXIES = [
     "http://aeeufstt:mmzjzap1e8nc@31.59.20.176:6754",
     "http://aeeufstt:mmzjzap1e8nc@31.56.127.193:7684",
@@ -24,32 +21,32 @@ PROXIES = [
 ]
 
 def monitor():
-    print("--- МОНИТОРИНГ ЗАПУЩЕН ---", flush=True)
+    print("--- [СТАРТ] Мониторинг запущен принудительно ---", flush=True)
     while True:
-        url = "https://api.sofascore.com/api/v1/sport/table-tennis/events/live"
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"}
-        
+        # Берем случайный прокси из списка
         proxy = random.choice(PROXIES)
-        print(f"Попытка через: {proxy.split('@')[1]}", flush=True)
+        print(f"--- Пытаюсь использовать прокси: {proxy.split('@')[1]} ---", flush=True)
         
         try:
-            resp = httpx.get(url, headers=headers, proxies={"http://": proxy, "https://": proxy}, timeout=10, verify=False)
-            print(f"Результат: {resp.status_code}", flush=True)
+            client = httpx.Client(proxies={"http://": proxy, "https://": proxy}, timeout=10.0, verify=False)
+            resp = client.get("https://api.sofascore.com/api/v1/sport/table-tennis/events/live", 
+                             headers={"User-Agent": "Mozilla/5.0"}, timeout=10.0)
             
+            print(f"--- Статус ответа: {resp.status_code} ---", flush=True)
             if resp.status_code == 200:
-                print("УСПЕХ! Данные получены.", flush=True)
-                # Здесь будет твоя логика отправки в TG
+                print(f"--- УСПЕХ! Данные получены ---", flush=True)
             else:
-                print(f"Ошибка {resp.status_code} на прокси {proxy.split('@')[1]}", flush=True)
+                print(f"--- Ошибка: {resp.status_code}. Пробуем другой прокси через 60 сек ---", flush=True)
         except Exception as e:
-            print(f"Ошибка соединения через {proxy.split('@')[1]}: {e}", flush=True)
+            print(f"--- Критическая ошибка прокси: {e} ---", flush=True)
             
-        time.sleep(30)
+        time.sleep(60)
 
 @app.route('/')
 def home():
-    return "Bot is active"
+    return "Bot is running"
 
 if __name__ == "__main__":
+    # Запускаем мониторинг как отдельный поток
     threading.Thread(target=monitor, daemon=True).start()
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
