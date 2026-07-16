@@ -27,16 +27,11 @@ def monitor():
         print(f"--- [СЕТЬ] Попытка через: {proxy_url.split('@')[1]} ---", flush=True)
         
         try:
-            # Правильный способ передачи прокси в httpx
-            transport = httpx.ProxyTransport(url=proxy_url)
-            with httpx.Client(transport=transport, timeout=10.0, verify=False) as client:
+            # Классический способ передачи прокси, совместимый со всеми версиями httpx
+            with httpx.Client(proxies=proxy_url, timeout=10.0, verify=False) as client:
                 resp = client.get("https://api.sofascore.com/api/v1/sport/table-tennis/events/live", timeout=10.0)
             
             print(f"--- [СЕТЬ] Статус: {resp.status_code} ---", flush=True)
-            if resp.status_code == 200:
-                print("--- [УСПЕХ] Данные получены! ---", flush=True)
-            else:
-                print(f"--- [ОШИБКА] Статус {resp.status_code} ---", flush=True)
         except Exception as e:
             print(f"--- [ОШИБКА] {str(e)} ---", flush=True)
             
