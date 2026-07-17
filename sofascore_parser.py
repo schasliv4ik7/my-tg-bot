@@ -5,7 +5,7 @@ import time
 import ssl
 import threading
 import os
-from urllib.error import HTTPError
+import cloudscraper  # <-- НОВАЯ БИБЛИОТЕКА ДЛЯ ОБХОДА 403 / CLOUDFLARE
 from flask import Flask
 
 # --- НАСТРОЙКИ TELEGRAM ---
@@ -27,21 +27,20 @@ MIN_STREAK_FAV = 3
 MIN_WIN_RATE_EQUAL = 55.0
 MIN_STREAK_EQUAL = 2
 
-# Заголовки для имитации браузера
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
-    "Accept": "application/json, text/plain, */*",
-    "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
-    "Referer": "https://www.sofascore.com/",
-    "Origin": "https://www.sofascore.com",
-    "Cache-Control": "no-cache"
-}
-
-# Отключение проверки SSL
+# Отключение проверки SSL для Telegram-запросов
 SSL_CONTEXT = ssl._create_unverified_context()
 
 # Множество для отправленных сигналов
 SENT_SIGNALS = set()
+
+# Создаем умный сканер, который умеет обходить защиту Cloudflare
+scraper = cloudscraper.create_scraper(
+    browser={
+        'browser': 'chrome',
+        'platform': 'windows',
+        'desktop': True
+    }
+)
 
 
 def send_telegram_message(text):
@@ -75,17 +74,15 @@ def parse_fractional_odds(fraction_str):
 
 
 def make_request(url, silent_404=False):
-    """Безопасный запрос к API Sofascore."""
+    """Запрос к API Sofascore через cloudscraper для обхода Cloudflare 403."""
     try:
-        req = urllib.request.Request(url, headers=HEADERS)
-        with urllib.request.urlopen(req, timeout=15, context=SSL_CONTEXT) as response:
-            if response.status == 200:
-                return json.loads(response.read().decode('utf-8'))
+        response = scraper.get(url, timeout=15)
+        if response.status_code == 200:
+            return response.json()
+        elif response.status_code == 404 and silent_404:
             return None
-    except HTTPError as e:
-        if e.code == 404 and silent_404:
-            return None
-        print(f"[Ошибка запроса]: HTTP Error {e.code}: {e.reason}", flush=True)
+        
+        print(f"[Ошибка запроса]: HTTP Status {response.status_code}", flush=True)
         return None
     except Exception as e:
         print(f"[Ошибка сетевого запроса]: {e}", flush=True)
@@ -327,12 +324,10 @@ app = Flask(__name__)
 def home():
     return "Бот активен, веб-порт открыт, сканирование идет 24/7!"
 
-# 🔥 ГЛАВНОЕ ИЗМЕНЕНИЕ ДЛЯ GUNICORN:
-# Запускаем фоновый процесс сразу при загрузке модуля веб-сервером
+
 print("[SYSTEM] Старт фонового потока мониторинга Sofascore...", flush=True)
 threading.Thread(target=monitor_table_tennis, daemon=True).start()
 
 if __name__ == "__main__":
-    # Локальный запуск
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
