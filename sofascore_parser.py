@@ -1,10 +1,10 @@
-import os
 import json
 import urllib.request
 import urllib.parse
 import time
 import ssl
 import threading
+import os  # <-- ИСПРАВЛЕНО: Добавлен обязательный импорт
 from urllib.error import HTTPError
 from flask import Flask
 
@@ -12,8 +12,7 @@ from flask import Flask
 BOT_TOKEN = "8225494453:AAG55D-7g0jxrQAyRsWK1qyJkK3mf0WGMgM"
 YOUR_CHAT_ID = "5777477925"
 
-# --- БЕЛЫЙ СПИСОК ТУРНИРОВ (ОБНОВЛЕН И РАСШИРЕН) ---
-# Добавлена лига Challenger Series и альтернативные варианты написания лиг
+# --- БЕЛЫЙ СПИСОК ТУРНИРОВ ---
 ALLOWED_TOURNAMENTS = [
     "liga pro", "лига про", 
     "setka cup", "сетка кап", "кубок сетка", 
@@ -21,15 +20,13 @@ ALLOWED_TOURNAMENTS = [
     "challenger series", "челленджер", "challenger"
 ]
 
-# --- НАСТРОЙКИ ДЛЯ СУПЕР-СИГНАЛА (Камбэк фаворита) ---
+# --- НАСТРОЙКИ СИГНАЛОВ ---
 MIN_WIN_RATE_FAV = 70.0
 MIN_STREAK_FAV = 3
 
-# --- НАСТРОЙКИ ДЛЯ СИГНАЛА "РАВНАЯ ИГРА" ---
 MIN_WIN_RATE_EQUAL = 55.0
 MIN_STREAK_EQUAL = 2
 
-# Заголовки для имитации браузера
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
     "Accept": "application/json, text/plain, */*",
@@ -39,7 +36,6 @@ HEADERS = {
     "Cache-Control": "no-cache"
 }
 
-# Отключение проверки SSL
 SSL_CONTEXT = ssl._create_unverified_context()
 
 # Множество для отправленных сигналов
@@ -47,7 +43,6 @@ SENT_SIGNALS = set()
 
 
 def send_telegram_message(text):
-    """Отправляет форматированное сообщение в Telegram."""
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": YOUR_CHAT_ID,
@@ -65,7 +60,6 @@ def send_telegram_message(text):
 
 
 def parse_fractional_odds(fraction_str):
-    """Преобразует дробный коэффициент в десятичный (float)."""
     if not fraction_str or "/" not in fraction_str:
         return None
     try:
@@ -77,7 +71,6 @@ def parse_fractional_odds(fraction_str):
 
 
 def make_request(url, silent_404=False):
-    """Безопасный запрос к API Sofascore."""
     try:
         req = urllib.request.Request(url, headers=HEADERS)
         with urllib.request.urlopen(req, timeout=15, context=SSL_CONTEXT) as response:
@@ -101,7 +94,6 @@ def get_live_table_tennis_matches():
 
 
 def get_match_odds(event_id):
-    """Возвращает предматчевые и текущие коэффициенты."""
     url = f"https://api.sofascore.com/api/v1/event/{event_id}/odds/1/all"
     odds_data = make_request(url, silent_404=True)
     
@@ -126,7 +118,6 @@ def get_match_odds(event_id):
 
 
 def get_player_stats(match_id, side):
-    """Анализирует последние 5 матчей игрока."""
     url = f"https://api.sofascore.com/api/v1/event/{match_id}/team-events/{side}"
     data = make_request(url, silent_404=True)
     
@@ -138,14 +129,13 @@ def get_player_stats(match_id, side):
     
     for event in events:
         home_id = event.get("homeTeam", {}).get("id")
-        away_id = event.get("awayTeam", {}).get("id")
         home_score = event.get("homeScore", {}).get("display")
         away_score = event.get("awayScore", {}).get("display")
         
         if home_score is None or away_score is None:
             continue
             
-        target_player_id = home_id if side == "home" else away_id
+        target_player_id = home_id if side == "home" else event.get("awayTeam", {}).get("id")
         
         if target_player_id == home_id:
             won = home_score > away_score
@@ -167,7 +157,6 @@ def get_player_stats(match_id, side):
             break
             
     symbols = "".join(["🟢" if w else "🔴" for w in wins])
-    
     return {"symbols": symbols, "win_rate": round(win_rate, 1), "streak": streak}
 
 
@@ -209,9 +198,9 @@ def monitor_table_tennis():
                         continue
                     
                     p1_start = odds.get("П1_старт")
-                    p2_start = odds.get("П2_старт")
+                    p2_start = odds.get("П2_start") or odds.get("П2_старт")
                     p1_live = odds.get("П1_лайв")
-                    p2_live = odds.get("П2_live_frac") or odds.get("П2_лайв")
+                    p2_live = odds.get("П2_лайв")  # <-- ИСПРАВЛЕНО: Убрана опечатка с П2_live_frac
                     
                     if not all([p1_start, p2_start, p1_live, p2_live]):
                         continue
@@ -226,9 +215,10 @@ def monitor_table_tennis():
                     
                     # --- СЦЕНАРИЙ 1: КАМБЭК ТОП-ФАВОРИТА (Игрок 1) ---
                     if 1.15 <= p1_start <= 1.38 and home_score < away_score and 1.60 <= p1_live <= 2.30:
+                        # ОПТИМИЗАЦИЯ: Запрашиваем статистику ТОЛЬКО если базовые условия (счет и кэфы) совпали
                         stats = get_player_stats(event_id, "home")
-                        opp_stats = get_player_stats(event_id, "away")
                         if stats["win_rate"] >= MIN_WIN_RATE_FAV and stats["streak"] >= MIN_STREAK_FAV:
+                            opp_stats = get_player_stats(event_id, "away")
                             signal_triggered = True
                             msg_text = (
                                 f"🔥 <b>СУПЕР-СИГНАЛ: Камбэк ТОП-фаворита!</b>\n\n"
@@ -247,8 +237,8 @@ def monitor_table_tennis():
                     # --- СЦЕНАРИЙ 1: КАМБЭК ТОП-ФАВОРИТА (Игрок 2) ---
                     elif 1.15 <= p2_start <= 1.38 and away_score < home_score and 1.60 <= p2_live <= 2.30:
                         stats = get_player_stats(event_id, "away")
-                        opp_stats = get_player_stats(event_id, "home")
                         if stats["win_rate"] >= MIN_WIN_RATE_FAV and stats["streak"] >= MIN_STREAK_FAV:
+                            opp_stats = get_player_stats(event_id, "home")
                             signal_triggered = True
                             msg_text = (
                                 f"🔥 <b>СУПЕР-СИГНАЛ: Камбэк ТОП-фаворита!</b>\n\n"
@@ -266,49 +256,54 @@ def monitor_table_tennis():
                     
                     # --- СЦЕНАРИЙ 2: РАВНАЯ ИГРА ТОПОВ (Счет 1:1 по сетам) ---
                     if not signal_triggered and (home_score == 1 and away_score == 1):
-                        p1_stats = get_player_stats(event_id, "home")
-                        p2_stats = get_player_stats(event_id, "away")
+                        # Сначала проверяем кэфы, чтобы не дергать API статы зря
+                        if 1.85 <= p1_live <= 2.20:
+                            p1_stats = get_player_stats(event_id, "home")
+                            if p1_stats["win_rate"] >= MIN_WIN_RATE_EQUAL and p1_stats["streak"] >= MIN_STREAK_EQUAL:
+                                p2_stats = get_player_stats(event_id, "away")
+                                signal_triggered = True
+                                msg_text = (
+                                    f"⚡ <b>СИГНАЛ: Равная игра ТОП-игроков!</b>\n\n"
+                                    f"🏆 {tournament_name}\n"
+                                    f"⚔️ <b>{home_player}</b> vs {away_player}\n"
+                                    f"📈 Счет по сетам: <b>1 : 1</b>\n\n"
+                                    f"📊 <b>Коэффициенты:</b>\n"
+                                    f"• <b>Лайв П1: <code>{p1_live}</code></b> 👈\n\n"
+                                    f"📈 <b>Аналитика ({home_player}):</b>\n"
+                                    f"• Форма: {p1_stats['symbols']} (Винрейт: {p1_stats['win_rate']}%, Стрик: {p1_stats['streak']})\n\n"
+                                    f"👤 <b>Соперник ({away_player}):</b>\n"
+                                    f"• Форма: {p2_stats['symbols']} (Винрейт: {p2_stats['win_rate']}%)"
+                                )
                         
-                        if p1_stats["win_rate"] >= MIN_WIN_RATE_EQUAL and p1_stats["streak"] >= MIN_STREAK_EQUAL and 1.85 <= p1_live <= 2.20:
-                            signal_triggered = True
-                            msg_text = (
-                                f"⚡ <b>СИГНАЛ: Равная игра ТОП-игроков!</b>\n\n"
-                                f"🏆 {tournament_name}\n"
-                                f"⚔️ <b>{home_player}</b> vs {away_player}\n"
-                                f"📈 Счет по сетам: <b>1 : 1</b>\n\n"
-                                f"📊 <b>Коэффициенты:</b>\n"
-                                f"• <b>Лайв П1: <code>{p1_live}</code></b> 👈\n\n"
-                                f"📈 <b>Аналитика ({home_player}):</b>\n"
-                                f"• Форма: {p1_stats['symbols']} (Винрейт: {p1_stats['win_rate']}%, Стрик: {p1_stats['streak']})\n\n"
-                                f"👤 <b>Соперник ({away_player}):</b>\n"
-                                f"• Форма: {p2_stats['symbols']} (Винрейт: {p2_stats['win_rate']}%)"
-                            )
-                        
-                        elif p2_stats["win_rate"] >= MIN_WIN_RATE_EQUAL and p2_stats["streak"] >= MIN_STREAK_EQUAL and 1.85 <= p2_live <= 2.20:
-                            signal_triggered = True
-                            msg_text = (
-                                f"⚡ <b>СИГНАЛ: Равная игра ТОП-игроков!</b>\n\n"
-                                f"🏆 {tournament_name}\n"
-                                f"⚔️ {home_player} vs <b>{away_player}</b>\n"
-                                f"📈 Счет по сетам: <b>1 : 1</b>\n\n"
-                                f"📊 <b>Коэффициенты:</b>\n"
-                                f"• <b>Лайв П2: <code>{p2_live}</code></b> 👈\n\n"
-                                f"📈 <b>Аналитика ({away_player}):</b>\n"
-                                f"• Форма: {p2_stats['symbols']} (Винрейт: {p2_stats['win_rate']}%, Стрик: {p2_stats['streak']})\n\n"
-                                f"👤 <b>Соперник ({home_player}):</b>\n"
-                                f"• Форма: {p1_stats['symbols']} (Винрейт: {p1_stats['win_rate']}%)"
-                            )
+                        elif 1.85 <= p2_live <= 2.20:
+                            p2_stats = get_player_stats(event_id, "away")
+                            if p2_stats["win_rate"] >= MIN_WIN_RATE_EQUAL and p2_stats["streak"] >= MIN_STREAK_EQUAL:
+                                p1_stats = get_player_stats(event_id, "home")
+                                signal_triggered = True
+                                msg_text = (
+                                    f"⚡ <b>СИГНАЛ: Равная игра ТОП-игроков!</b>\n\n"
+                                    f"🏆 {tournament_name}\n"
+                                    f"⚔️ {home_player} vs <b>{away_player}</b>\n"
+                                    f"📈 Счет по сетам: <b>1 : 1</b>\n\n"
+                                    f"📊 <b>Коэффициенты:</b>\n"
+                                    f"• <b>Лайв П2: <code>{p2_live}</code></b> 👈\n\n"
+                                    f"📈 <b>Аналитика ({away_player}):</b>\n"
+                                    f"• Форма: {p2_stats['symbols']} (Винрейт: {p2_stats['win_rate']}%, Стрик: {p2_stats['streak']})\n\n"
+                                    f"👤 <b>Соперник ({home_player}):</b>\n"
+                                    f"• Форма: {p1_stats['symbols']} (Винрейт: {p1_stats['win_rate']}%)"
+                                )
                     
                     if signal_triggered:
                         print(f"[ОТПРАВЛЕНО] {home_player} - {away_player} ({tournament_name})")
                         send_telegram_message(msg_text)
                         SENT_SIGNALS.add(event_id)
                     
-                    time.sleep(1.5)
+                    time.sleep(1.2)  # Небольшая пауза между обработкой матчей, чтобы разгрузить CPU и сеть
                 
+                # ИСПРАВЛЕНО: Безопасное удаление завершенных матчей без RuntimeError
                 expired_matches = SENT_SIGNALS - current_live_ids
-                for expired_id in expired_matches:
-                    SENT_SIGNALS.remove(expired_id)
+                if expired_matches:
+                    SENT_SIGNALS -= expired_matches
             else:
                 print("Сейчас нет активных лайв-матчей.")
                 
