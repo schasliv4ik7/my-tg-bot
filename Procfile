@@ -1,1 +1,1 @@
-web: gunicorn sofascore_parser:app
+web: gunicorn app:app
