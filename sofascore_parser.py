@@ -4,7 +4,7 @@ import urllib.parse
 import time
 import ssl
 import threading
-import os  # <-- ИСПРАВЛЕНО: Добавлен обязательный импорт
+import os
 from urllib.error import HTTPError
 from flask import Flask
 
@@ -27,6 +27,7 @@ MIN_STREAK_FAV = 3
 MIN_WIN_RATE_EQUAL = 55.0
 MIN_STREAK_EQUAL = 2
 
+# Заголовки для имитации браузера
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
     "Accept": "application/json, text/plain, */*",
@@ -36,6 +37,7 @@ HEADERS = {
     "Cache-Control": "no-cache"
 }
 
+# Отключение проверки SSL
 SSL_CONTEXT = ssl._create_unverified_context()
 
 # Множество для отправленных сигналов
@@ -43,6 +45,7 @@ SENT_SIGNALS = set()
 
 
 def send_telegram_message(text):
+    """Отправляет форматированное сообщение в Telegram."""
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": YOUR_CHAT_ID,
@@ -54,12 +57,13 @@ def send_telegram_message(text):
         req = urllib.request.Request(url, data=data, method="POST")
         with urllib.request.urlopen(req, timeout=10, context=SSL_CONTEXT) as response:
             if response.status != 200:
-                print(f"[Telegram] Ошибка отправки: {response.status}")
+                print(f"[Telegram] Ошибка отправки: {response.status}", flush=True)
     except Exception as e:
-        print(f"[Telegram] Ошибка подключения: {e}")
+        print(f"[Telegram] Ошибка подключения: {e}", flush=True)
 
 
 def parse_fractional_odds(fraction_str):
+    """Преобразует дробный коэффициент в десятичный (float)."""
     if not fraction_str or "/" not in fraction_str:
         return None
     try:
@@ -71,6 +75,7 @@ def parse_fractional_odds(fraction_str):
 
 
 def make_request(url, silent_404=False):
+    """Безопасный запрос к API Sofascore."""
     try:
         req = urllib.request.Request(url, headers=HEADERS)
         with urllib.request.urlopen(req, timeout=15, context=SSL_CONTEXT) as response:
@@ -80,10 +85,10 @@ def make_request(url, silent_404=False):
     except HTTPError as e:
         if e.code == 404 and silent_404:
             return None
-        print(f"[Ошибка запроса]: HTTP Error {e.code}: {e.reason}")
+        print(f"[Ошибка запроса]: HTTP Error {e.code}: {e.reason}", flush=True)
         return None
     except Exception as e:
-        print(f"[Ошибка сетевого запроса]: {e}")
+        print(f"[Ошибка сетевого запроса]: {e}", flush=True)
         return None
 
 
@@ -94,6 +99,7 @@ def get_live_table_tennis_matches():
 
 
 def get_match_odds(event_id):
+    """Возвращает предматчевые и текущие коэффициенты."""
     url = f"https://api.sofascore.com/api/v1/event/{event_id}/odds/1/all"
     odds_data = make_request(url, silent_404=True)
     
@@ -118,6 +124,7 @@ def get_match_odds(event_id):
 
 
 def get_player_stats(match_id, side):
+    """Анализирует последние 5 матчей игрока."""
     url = f"https://api.sofascore.com/api/v1/event/{match_id}/team-events/{side}"
     data = make_request(url, silent_404=True)
     
@@ -168,7 +175,8 @@ def is_tournament_allowed(tournament_name):
 
 
 def monitor_table_tennis():
-    print("=== Двухуровневый фильтр сигналов запущен ===")
+    global SENT_SIGNALS
+    print("=== Двухуровневый фильтр сигналов запущен ===", flush=True)
     send_telegram_message(
         f"🤖 <b>Двухуровневый фильтр успешно запущен на Render!</b>\n"
         f"1️⃣ <b>Камбэк фаворита:</b> винрейт {MIN_WIN_RATE_FAV}%, стрик {MIN_STREAK_FAV}\n"
@@ -198,9 +206,9 @@ def monitor_table_tennis():
                         continue
                     
                     p1_start = odds.get("П1_старт")
-                    p2_start = odds.get("П2_start") or odds.get("П2_старт")
+                    p2_start = odds.get("П2_старт")
                     p1_live = odds.get("П1_лайв")
-                    p2_live = odds.get("П2_лайв")  # <-- ИСПРАВЛЕНО: Убрана опечатка с П2_live_frac
+                    p2_live = odds.get("П2_лайв")
                     
                     if not all([p1_start, p2_start, p1_live, p2_live]):
                         continue
@@ -215,7 +223,6 @@ def monitor_table_tennis():
                     
                     # --- СЦЕНАРИЙ 1: КАМБЭК ТОП-ФАВОРИТА (Игрок 1) ---
                     if 1.15 <= p1_start <= 1.38 and home_score < away_score and 1.60 <= p1_live <= 2.30:
-                        # ОПТИМИЗАЦИЯ: Запрашиваем статистику ТОЛЬКО если базовые условия (счет и кэфы) совпали
                         stats = get_player_stats(event_id, "home")
                         if stats["win_rate"] >= MIN_WIN_RATE_FAV and stats["streak"] >= MIN_STREAK_FAV:
                             opp_stats = get_player_stats(event_id, "away")
@@ -256,7 +263,6 @@ def monitor_table_tennis():
                     
                     # --- СЦЕНАРИЙ 2: РАВНАЯ ИГРА ТОПОВ (Счет 1:1 по сетам) ---
                     if not signal_triggered and (home_score == 1 and away_score == 1):
-                        # Сначала проверяем кэфы, чтобы не дергать API статы зря
                         if 1.85 <= p1_live <= 2.20:
                             p1_stats = get_player_stats(event_id, "home")
                             if p1_stats["win_rate"] >= MIN_WIN_RATE_EQUAL and p1_stats["streak"] >= MIN_STREAK_EQUAL:
@@ -294,23 +300,23 @@ def monitor_table_tennis():
                                 )
                     
                     if signal_triggered:
-                        print(f"[ОТПРАВЛЕНО] {home_player} - {away_player} ({tournament_name})")
+                        print(f"[ОТПРАВЛЕНО] {home_player} - {away_player} ({tournament_name})", flush=True)
                         send_telegram_message(msg_text)
                         SENT_SIGNALS.add(event_id)
                     
-                    time.sleep(1.2)  # Небольшая пауза между обработкой матчей, чтобы разгрузить CPU и сеть
+                    time.sleep(1.2)
                 
-                # ИСПРАВЛЕНО: Безопасное удаление завершенных матчей без RuntimeError
+                # Безопасное удаление завершенных матчей
                 expired_matches = SENT_SIGNALS - current_live_ids
                 if expired_matches:
                     SENT_SIGNALS -= expired_matches
             else:
-                print("Сейчас нет активных лайв-матчей.")
+                print("Сейчас нет активных лайв-матчей.", flush=True)
                 
         except Exception as e:
-            print(f"[Фоновая ошибка мониторинга]: {e}")
+            print(f"[Фоновая ошибка мониторинга]: {e}", flush=True)
             
-        print("Сканирование завершено. Ожидание 30 сек...")
+        print("Сканирование завершено. Ожидание 30 сек...", flush=True)
         time.sleep(30)
 
 
@@ -321,10 +327,12 @@ app = Flask(__name__)
 def home():
     return "Бот активен, веб-порт открыт, сканирование идет 24/7!"
 
+# 🔥 ГЛАВНОЕ ИЗМЕНЕНИЕ ДЛЯ GUNICORN:
+# Запускаем фоновый процесс сразу при загрузке модуля веб-сервером
+print("[SYSTEM] Старт фонового потока мониторинга Sofascore...", flush=True)
+threading.Thread(target=monitor_table_tennis, daemon=True).start()
+
 if __name__ == "__main__":
-    # Запуск логики парсера в отдельном независимом потоке
-    threading.Thread(target=monitor_table_tennis, daemon=True).start()
-    
-    # Запуск веб-сервера Flask на динамическом порту Render
+    # Локальный запуск
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
