@@ -36,7 +36,7 @@ SSL_CONTEXT = ssl._create_unverified_context()
 # Множество для отправленных сигналов
 SENT_SIGNALS = set()
 
-# Создаем сканер
+# Создаем сканер с продвинутой маскировкой под реальный браузер
 scraper = cloudscraper.create_scraper(
     browser={
         'browser': 'chrome',
@@ -44,6 +44,21 @@ scraper = cloudscraper.create_scraper(
         'desktop': True
     }
 )
+
+# Добавляем реалистичные заголовки, чтобы Sofascore не выдавал 403
+scraper.headers.update({
+    "accept": "*/*",
+    "accept-language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+    "cache-control": "no-cache",
+    "pragma": "no-cache",
+    "sec-ch-ua": '"Not/A)Brand";v="8", "Chromium";v="126", "Google Chrome";v="126"',
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": '"Windows"',
+    "sec-fetch-dest": "empty",
+    "sec-fetch-mode": "cors",
+    "sec-fetch-site": "same-site",
+    "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+})
 
 
 def get_proxy_dict():
@@ -91,7 +106,7 @@ def parse_fractional_odds(fraction_str):
 
 
 def make_request(url, silent_404=False):
-    """Запрос к API Sofascore через выделенный рабочий прокси."""
+    """Запрос к API Sofascore через выделенный рабочий прокси с логированием деталей."""
     proxies_dict = get_proxy_dict()
     if not proxies_dict:
         return None
@@ -104,10 +119,10 @@ def make_request(url, silent_404=False):
             elif response.status_code == 404 and silent_404:
                 return None
             
-            print(f"[Ошибка API]: Код {response.status_code} на попытке {attempt + 1}. Повтор...", flush=True)
+            print(f"[Ошибка API]: Код {response.status_code} на попытке {attempt + 1}. URL: {url}", flush=True)
         except Exception as e:
-            print(f"[Ошибка сети]: Сбой подключения ({e}) на попытке {attempt + 1}. Повтор...", flush=True)
-        time.sleep(2)
+            print(f"[Ошибка сети]: Сбой подключения ({e}) на попытке {attempt + 1}.", flush=True)
+        time.sleep(3)
             
     return None
 
@@ -196,12 +211,10 @@ def is_tournament_allowed(tournament_name):
 
 def monitor_table_tennis():
     global SENT_SIGNALS
-    print("=== Мониторинг запущен на выделенном рабочем прокси ===", flush=True)
+    print("=== Мониторинг запущен на выделенном прокси с кастомными заголовками ===", flush=True)
     send_telegram_message(
-        f"🤖 <b>Бот успешно перезапущен на Render с рабочим прокси!</b>\n"
-        f"1️⃣ <b>Камбэк фаворита:</b> винрейт {MIN_WIN_RATE_FAV}%, стрик {MIN_STREAK_FAV}\n"
-        f"2️⃣ <b>Равная игра ТОП:</b> винрейт {MIN_WIN_RATE_EQUAL}%, стрик {MIN_STREAK_EQUAL}\n"
-        f"🌐 Трафик зафиксирован через прокси: 158.46.145.135"
+        f"🤖 <b>Бот успешно перезапущен на Render с улучшенными заголовками!</b>\n"
+        f"🌐 Трафик маскируется под Chrome на Windows через твой рабочий прокси."
     )
     
     while True:
@@ -344,7 +357,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Бот на выделенном прокси работает 24/7!"
+    return "Бот с усиленными заголовками работает!"
 
 print("[SYSTEM] Старт фонового потока мониторинга Sofascore...", flush=True)
 threading.Thread(target=monitor_table_tennis, daemon=True).start()
