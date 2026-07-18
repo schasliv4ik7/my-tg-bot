@@ -12,21 +12,8 @@ from flask import Flask
 BOT_TOKEN = "8225494453:AAG55D-7g0jxrQAyRsWK1qyJkK3mf0WGMgM"
 YOUR_CHAT_ID = "5777477925"
 
-# --- ПУЛ ПРОКСИ WEBSHARE (АВТО-РОТАЦИЯ) ---
-PROXIES_LIST = [
-    "31.59.20.176:6754:aeeufstt:mmzjzap1e8nc",
-    "31.56.127.193:7684:aeeufstt:mmzjzap1e8nc",
-    "45.38.107.97:6014:aeeufstt:mmzjzap1e8nc",
-    "198.105.121.200:6462:aeeufstt:mmzjzap1e8nc",
-    "64.137.96.74:6641:aeeufstt:mmzjzap1e8nc",
-    "198.23.243.226:6361:aeeufstt:mmzjzap1e8nc",
-    "38.154.185.97:6370:aeeufstt:mmzjzap1e8nc",
-    "84.247.60.125:6095:aeeufstt:mmzjzap1e8nc",
-    "142.111.67.146:5611:aeeufstt:mmzjzap1e8nc",
-    "191.96.254.138:6185:aeeufstt:mmzjzap1e8nc"
-]
-
-current_proxy_index = 0
+# --- РАБОЧИЙ ПРОКСИ ---
+PROXY_RAW = "158.46.145.135:64310:TvSYGxHL:H19ycY2V"
 
 # --- БЕЛЫЙ СПИСОК ТУРНИРОВ ---
 ALLOWED_TOURNAMENTS = [
@@ -59,27 +46,18 @@ scraper = cloudscraper.create_scraper(
 )
 
 
-def get_current_proxies_dict():
-    """Формирует словарь прокси для текущего индекса."""
-    global current_proxy_index
-    raw_proxy = PROXIES_LIST[current_proxy_index]
+def get_proxy_dict():
+    """Формирует словарь прокси из строки."""
     try:
-        ip, port, user, password = raw_proxy.split(":")
+        ip, port, user, password = PROXY_RAW.split(":")
         proxy_address = f"{user}:{password}@{ip}:{port}"
         return {
             "http": f"http://{proxy_address}",
             "https": f"http://{proxy_address}"
-        }, f"{ip}:{port}"
-    except Exception:
-        return None, "Ошибка формата"
-
-
-def rotate_proxy():
-    """Переключает на следующий прокси в списке."""
-    global current_proxy_index
-    current_proxy_index = (current_proxy_index + 1) % len(PROXIES_LIST)
-    _, addr = get_current_proxies_dict()
-    print(f"🔄 Смена прокси! Пробуем адрес: {addr}", flush=True)
+        }
+    except Exception as e:
+        print(f"[КРИТИЧЕСКАЯ ОШИБКА]: Неверный формат прокси: {e}", flush=True)
+        return None
 
 
 def send_telegram_message(text):
@@ -113,25 +91,23 @@ def parse_fractional_odds(fraction_str):
 
 
 def make_request(url, silent_404=False):
-    """Запрос к API Sofascore через cloudscraper с умной ротацией прокси при ошибках."""
-    for _ in range(5):
-        proxies_dict, addr = get_current_proxies_dict()
-        if not proxies_dict:
-            rotate_proxy()
-            continue
-            
+    """Запрос к API Sofascore через выделенный рабочий прокси."""
+    proxies_dict = get_proxy_dict()
+    if not proxies_dict:
+        return None
+        
+    for attempt in range(3):
         try:
-            response = scraper.get(url, proxies=proxies_dict, timeout=10)
+            response = scraper.get(url, proxies=proxies_dict, timeout=12)
             if response.status_code == 200:
                 return response.json()
             elif response.status_code == 404 and silent_404:
                 return None
             
-            print(f"[Ошибка API]: {addr} вернул HTTP {response.status_code}. Меняем прокси...", flush=True)
-            rotate_proxy()
+            print(f"[Ошибка API]: Код {response.status_code} на попытке {attempt + 1}. Повтор...", flush=True)
         except Exception as e:
-            print(f"[Ошибка сети]: {addr} сбоит ({e}). Меняем прокси...", flush=True)
-            rotate_proxy()
+            print(f"[Ошибка сети]: Сбой подключения ({e}) на попытке {attempt + 1}. Повтор...", flush=True)
+        time.sleep(2)
             
     return None
 
@@ -220,12 +196,12 @@ def is_tournament_allowed(tournament_name):
 
 def monitor_table_tennis():
     global SENT_SIGNALS
-    print("=== Двухуровневый фильтр с РОТАЦИЕЙ ПРОКСИ запущен ===", flush=True)
+    print("=== Мониторинг запущен на выделенном рабочем прокси ===", flush=True)
     send_telegram_message(
-        f"🤖 <b>Бот успешно перезапущен на Render с пулом прокси!</b>\n"
+        f"🤖 <b>Бот успешно перезапущен на Render с рабочим прокси!</b>\n"
         f"1️⃣ <b>Камбэк фаворита:</b> винрейт {MIN_WIN_RATE_FAV}%, стрик {MIN_STREAK_FAV}\n"
         f"2️⃣ <b>Равная игра ТОП:</b> винрейт {MIN_WIN_RATE_EQUAL}%, стрик {MIN_STREAK_EQUAL}\n"
-        f"🌐 Защита Cloudflare теперь обходится через автоматическую ротацию 10 IP."
+        f"🌐 Трафик зафиксирован через прокси: 158.46.145.135"
     )
     
     while True:
@@ -348,7 +324,7 @@ def monitor_table_tennis():
                         send_telegram_message(msg_text)
                         SENT_SIGNALS.add(event_id)
                     
-                    time.sleep(1.2)
+                    time.sleep(1.5)
                 
                 expired_matches = SENT_SIGNALS - current_live_ids
                 if expired_matches:
@@ -368,7 +344,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Ротационный бот работает 24/7!"
+    return "Бот на выделенном прокси работает 24/7!"
 
 print("[SYSTEM] Старт фонового потока мониторинга Sofascore...", flush=True)
 threading.Thread(target=monitor_table_tennis, daemon=True).start()
